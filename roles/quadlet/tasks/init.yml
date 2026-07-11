@@ -1,0 +1,353 @@
+# Initialization: Manage internal role setup and the Ansible environment.
+
+---
+
+- name: "Init | Gather role-specific facts"
+  ansible.builtin.setup:
+    gather_subset: "{{ __quadlet_podman_used_facts }}"
+  when:
+    - not (__quadlet_podman_used_facts is subset(ansible_facts.keys()))
+
+
+- name: "Init | Include role meta data"
+  ansible.builtin.include_vars:
+    file: "../meta/main.yml"
+    name: "__quadlet_podman_meta"
+
+
+- name: "Init | Check Ansible version requirement and fail if unmet"
+  ansible.builtin.fail:
+    msg: >
+      This role requires Ansible {{ __quadlet_podman_meta['galaxy_info']['min_ansible_version'] }}
+      or higher. You are currently running Ansible {{ ansible_version['full'] }} .
+  when:
+    - ansible_version['full'] is version_compare(__quadlet_podman_meta['galaxy_info']['min_ansible_version'], '<')
+
+
+- name: "Init | Notify when platform support check is not possible"
+  ansible.builtin.debug:
+    msg: >
+      The list of supported platforms cannot be checked as it is either empty
+      or distribution facts are missing.
+    verbosity: 1
+  when:
+    - ansible_facts['os_family'] is not ansible.builtin.defined or
+      ansible_facts['distribution'] is not ansible.builtin.defined or
+      ansible_facts['distribution_version'] is not ansible.builtin.defined or
+      ansible_facts['distribution_major_version'] is not ansible.builtin.defined or
+      ((__quadlet_podman_supported_platforms | ansible.builtin.length) == 0)
+
+
+- name: "Init | Warn when platform is unsupported"
+  ansible.builtin.fail:
+    msg: >
+      Neither {{ ansible_facts['distribution'] }} (distribution) nor {{ ansible_facts['os_family'] }} (os_family)
+      with versions '{{ ansible_facts['distribution_major_version'] }}', '{{ ansible_facts['distribution_version'] }}',
+      or 'all' is in the list of supported platforms from vars/main.yml: {{ __quadlet_podman_supported_platforms }}
+  vars:
+    __quadlet_podman_platform_names_regex: >-
+      ^({{ ansible_facts['distribution'] }}|{{ ansible_facts['os_family'] }})$
+    __quadlet_podman_platform_versions_regex: >-
+      ^({{ ansible_facts['distribution_major_version'] }}|{{ ansible_facts['distribution_version'] }}|all)$
+    __quadlet_podman_matched_versions: >-
+      {{
+        __quadlet_podman_supported_platforms
+        | ansible.builtin.selectattr('name', 'match', __quadlet_podman_platform_names_regex, ignorecase=true)
+        | ansible.builtin.map(attribute='versions')
+        | ansible.builtin.flatten
+        | ansible.builtin.select('match', __quadlet_podman_platform_versions_regex, ignorecase=true)
+        | ansible.builtin.list
+      }}
+  when:
+    - (__quadlet_podman_supported_platforms | ansible.builtin.length) > 0
+    - (__quadlet_podman_matched_versions | ansible.builtin.length) == 0
+  ignore_errors: true # noqa: ignore-errors
+
+
+- name: "Init | Set platform-specific filename list (most to least specific; raw with possible duplicates)"
+  ansible.builtin.set_fact:
+    __quadlet_podman_platform_filenames_raw:
+      - "{{ __quadlet_podman_dist }}_{{ __quadlet_podman_dist_ver }}.yml"
+      - "{{ __quadlet_podman_dist }}_{{ __quadlet_podman_dist_major }}.yml"
+      - "{{ __quadlet_podman_dist }}.yml"
+      - "{{ __quadlet_podman_os_family }}.yml"
+  vars:
+    __quadlet_podman_dist: >-
+      {{
+        ansible_facts['distribution']
+        | ansible.builtin.regex_replace(' ', '_')
+        | ansible.builtin.lower
+      }}
+    __quadlet_podman_dist_ver: >-
+      {{
+        ansible_facts['distribution_version']
+        | ansible.builtin.regex_replace(' ', '_')
+        | ansible.builtin.lower
+      }}
+    __quadlet_podman_dist_major: >-
+      {{
+        ansible_facts['distribution_major_version']
+        | ansible.builtin.regex_replace(' ', '_')
+        | ansible.builtin.lower
+      }}
+    __quadlet_podman_os_family: >-
+      {{
+        ansible_facts['os_family']
+        | ansible.builtin.regex_replace(' ', '_')
+        | ansible.builtin.lower
+      }}
+
+
+- name: "Init | Set unique platform-specific filename list (most to least specific)"
+  ansible.builtin.set_fact:
+    __quadlet_podman_platform_filenames_most_specific_first: >-
+      {{
+        (__quadlet_podman_platform_filenames_raw
+        | ansible.builtin.unique
+        | ansible.builtin.default([]))
+      }}
+
+
+- name: "Init | Set unique platform-specific filename list (least to most specific)"
+  ansible.builtin.set_fact:
+    __quadlet_podman_platform_filenames_most_specific_last: >-
+      {{
+        __quadlet_podman_platform_filenames_most_specific_first
+        | ansible.builtin.reverse
+      }}
+
+
+- name: "Init | Include platform-specific variables (if any), overwrite values with more specific ones"
+  ansible.builtin.include_vars:
+    file: "{{ __quadlet_podman_vars_file }}"
+  vars:
+    __quadlet_podman_vars_file: "{{ role_path }}/vars/{{ item }}"
+  when:
+    - __quadlet_podman_vars_file is ansible.builtin.file
+  loop: "{{ __quadlet_podman_platform_filenames_most_specific_last }}"
+
+
+### quadlet specific
+
+- name: "Init | Check basic application input for validity"
+  ansible.builtin.assert:
+    that:
+      # application identifier: lowercase letters, digits, "_" and "-"
+      - quadlet_podman_app is ansible.builtin.match('^[a-z0-9_-]+$')
+      # unit names: unique and safe for filenames / systemd unit names
+      - >-
+        (quadlet_podman_units | ansible.builtin.map(attribute='name') | ansible.builtin.length)
+        ==
+        (quadlet_podman_units | ansible.builtin.map(attribute='name') | ansible.builtin.unique | ansible.builtin.length)
+      - >-
+        quadlet_podman_units
+        | ansible.builtin.map(attribute='name')
+        | ansible.builtin.reject('match', '^[A-Za-z0-9_.-]+$')
+        | ansible.builtin.length == 0
+      # slirp4netns was removed in Podman 6; pasta is the rootless default
+      - quadlet_podman_units | ansible.builtin.string is not ansible.builtin.search('slirp4netns')
+    fail_msg: >-
+      Invalid input: quadlet_podman_app must match '^[a-z0-9_-]+$'; unit names in
+      quadlet_podman_units must be unique, match '^[A-Za-z0-9_.-]+$' and must not
+      reference the removed 'slirp4netns' network mode (use 'pasta' instead).
+    quiet: true
+
+
+- name: "Init | Build the effective unit list (type defaults merged with each unit's sections)"
+  ansible.builtin.set_fact:
+    __quadlet_podman_units_effective: >-
+      {%- set __ns = namespace(units=[]) -%}
+      {%- for __u in quadlet_podman_units -%}
+      {%-   set __type = __u['type'] -%}
+      {%-   set __sections = (quadlet_podman_unit_defaults[__type] | ansible.builtin.default({}))
+              | ansible.builtin.combine(__u['sections'], recursive=true) -%}
+      {%-   set _ = __ns.units.append({
+              'name': __u['name'],
+              'type': __type,
+              'filename': __u['name'] ~ '.' ~ __type,
+              'service': __u['name'] ~ __quadlet_podman_service_suffix_map[__type] ~ '.service',
+              'sections': __sections,
+              'has_install': ('Install' in __sections),
+            }) -%}
+      {%- endfor -%}
+      {{ __ns.units }}
+
+
+- name: "Init | Build the unit name to generated service name map"
+  ansible.builtin.set_fact:
+    __quadlet_podman_service_map: >-
+      {{
+        dict(
+          __quadlet_podman_units_effective | ansible.builtin.map(attribute='name')
+          | ansible.builtin.zip(__quadlet_podman_units_effective | ansible.builtin.map(attribute='service'))
+        )
+      }}
+
+
+- name: "Init | Check that every pod membership references a pod unit of this application"
+  ansible.builtin.assert:
+    that:
+      - >-
+        (__quadlet_podman_unit_item['sections']['Container']['Pod'] | ansible.builtin.regex_replace('\.pod$', ''))
+        in (
+          __quadlet_podman_units_effective
+          | ansible.builtin.selectattr('type', 'eq', 'pod')
+          | ansible.builtin.map(attribute='name')
+          | ansible.builtin.list
+        )
+    fail_msg: >-
+      The unit '{{ __quadlet_podman_unit_item['name'] }}' references
+      '{{ __quadlet_podman_unit_item['sections']['Container']['Pod'] }}' but
+      quadlet_podman_units contains no pod unit of that name. Add the pod unit
+      to the same application (the role manages an application as one set).
+    quiet: true
+  when:
+    - __quadlet_podman_unit_item['type'] == 'container'
+    - __quadlet_podman_unit_item['sections']['Container']['Pod'] is ansible.builtin.defined
+  loop: "{{ __quadlet_podman_units_effective }}"
+  loop_control:
+    loop_var: "__quadlet_podman_unit_item"
+    label: "{{ __quadlet_podman_unit_item['name'] }}"
+
+
+- name: "Init | Query the rootless target account"
+  ansible.builtin.getent:
+    database: "passwd"
+    key: "{{ quadlet_podman_user }}"
+    fail_key: false
+  when:
+    - __quadlet_podman_rootless | ansible.builtin.bool
+
+
+- name: "Init | Store rootless account facts"
+  ansible.builtin.set_fact:
+    __quadlet_podman_user_exists: >-
+      {{
+        (not (__quadlet_podman_rootless | ansible.builtin.bool))
+        or (ansible_facts['getent_passwd'][quadlet_podman_user] is not none)
+      }}
+    __quadlet_podman_user_uid: >-
+      {{
+        ansible_facts['getent_passwd'][quadlet_podman_user][1]
+        if ((__quadlet_podman_rootless | ansible.builtin.bool)
+            and ansible_facts['getent_passwd'][quadlet_podman_user] is not none)
+        else ''
+      }}
+    __quadlet_podman_user_gid: >-
+      {{
+        ansible_facts['getent_passwd'][quadlet_podman_user][2]
+        if ((__quadlet_podman_rootless | ansible.builtin.bool)
+            and ansible_facts['getent_passwd'][quadlet_podman_user] is not none)
+        else ''
+      }}
+    __quadlet_podman_user_home: >-
+      {{
+        ansible_facts['getent_passwd'][quadlet_podman_user][4]
+        if ((__quadlet_podman_rootless | ansible.builtin.bool)
+            and ansible_facts['getent_passwd'][quadlet_podman_user] is not none)
+        else ''
+      }}
+
+
+- name: "Init | Check the rootless prerequisites (account, lingering, user runtime directory)"
+  when:
+    - quadlet_podman_state == 'present'
+    - __quadlet_podman_rootless | ansible.builtin.bool
+  block:
+
+    - name: "Init | Check the rootless target account exists"
+      ansible.builtin.assert:
+        that:
+          - __quadlet_podman_user_exists | ansible.builtin.bool
+        fail_msg: >-
+          The account '{{ quadlet_podman_user }}' (quadlet_podman_user) does not
+          exist. This role does not create accounts; create it beforehand (e.g.
+          with the foundata.linux.user role) and enable it for rootless Podman
+          usage via host_podman_rootless_users of the foundata.podman.host role.
+        quiet: true
+
+
+    - name: "Init | Check lingering status of the rootless target account"
+      ansible.builtin.stat:
+        path: "/var/lib/systemd/linger/{{ quadlet_podman_user }}"
+      register: __quadlet_podman_linger_stat
+
+
+    - name: "Init | Check the user runtime directory of the rootless target account"
+      ansible.builtin.stat:
+        path: "/run/user/{{ __quadlet_podman_user_uid }}"
+      register: __quadlet_podman_runtime_dir_stat
+
+
+    - name: "Init | Check the rootless prerequisites are met"
+      ansible.builtin.assert:
+        that:
+          - __quadlet_podman_linger_stat['stat']['exists']
+          - __quadlet_podman_runtime_dir_stat['stat']['exists']
+        fail_msg: >-
+          The account '{{ quadlet_podman_user }}' is not ready for rootless Podman
+          usage: systemd lingering must be enabled and the user runtime directory
+          /run/user/{{ __quadlet_podman_user_uid }} must exist (a lingering user's
+          systemd instance provides it). Enable the account via
+          host_podman_rootless_users of the foundata.podman.host role first.
+        quiet: true
+
+
+- name: "Init | Check the installed Podman version fits the application"
+  when:
+    - quadlet_podman_state == 'present'
+  block:
+
+    - name: "Init | Check the Podman executable is available"
+      ansible.builtin.stat:
+        path: "{{ __quadlet_podman_podman_exec_path }}"
+      register: __quadlet_podman_exec_stat
+
+
+    - name: "Init | Check Podman is installed"
+      ansible.builtin.assert:
+        that:
+          - __quadlet_podman_exec_stat['stat']['exists']
+        fail_msg: >-
+          Podman is not installed ({{ __quadlet_podman_podman_exec_path }} is
+          missing). Set up the container environment with the
+          foundata.podman.host role before deploying applications.
+        quiet: true
+
+
+    - name: "Init | Determine the installed Podman version"
+      ansible.builtin.command:
+        argv:
+          - "{{ __quadlet_podman_podman_exec_path }}"
+          - "--version"
+      register: __quadlet_podman_version_result
+      changed_when: false
+
+
+    - name: "Init | Store the installed Podman version as fact"
+      ansible.builtin.set_fact:
+        __quadlet_podman_version: >-
+          {{
+            __quadlet_podman_version_result['stdout']
+            | ansible.builtin.regex_search('[0-9]+\.[0-9]+(\.[0-9]+)?')
+          }}
+
+
+    - name: "Init | Check Podman version requirements and fail if unmet"
+      ansible.builtin.assert:
+        that:
+          - __quadlet_podman_version is version_compare(__quadlet_podman_min_podman_version, '>=')
+          - >-
+            (quadlet_podman_min_podman_version is not ansible.builtin.defined)
+            or (__quadlet_podman_version is version_compare(quadlet_podman_min_podman_version, '>='))
+          - >-
+            ((__quadlet_podman_units_effective | ansible.builtin.selectattr('type', 'eq', 'artifact') | ansible.builtin.length) == 0)
+            or (__quadlet_podman_version is version_compare(__quadlet_podman_artifact_min_podman_version, '>='))
+        fail_msg: >-
+          Podman {{ __quadlet_podman_version }} is too old for this application:
+          the role requires at least {{ __quadlet_podman_min_podman_version }},
+          quadlet_podman_min_podman_version requires
+          {{ quadlet_podman_min_podman_version | ansible.builtin.default('(unset)') }}
+          and "artifact" units require at least
+          {{ __quadlet_podman_artifact_min_podman_version }}.
+        quiet: true

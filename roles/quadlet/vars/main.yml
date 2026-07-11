@@ -1,0 +1,264 @@
+# Internal role variables and values that must NOT be overridden by the user.
+#
+# Variables defined here usually override earlier definitions due to the high
+# precedence of this file. Each variable should have a concise comment above
+# it, describing its purpose and how it fits into the role's functionality.
+
+---
+
+# List of facts used by the role (gathered on a best-effort basis if needed).
+#
+# To identify which subset a fact belongs to during development, you can use
+# the following snippet:
+#
+# - ansible.builtin.setup:
+#     gather_subset:
+#       - '!min'
+#       - '<subset_name, see parameter doc for details>'
+__quadlet_podman_used_facts:
+  # from subset "distribution"
+  - "distribution"
+  - "distribution_major_version"
+  - "distribution_version"
+  - "os_family"
+  # from subset "service_mgr" (the generated Quadlet services are systemd
+  # units; nearly everything this role does is gated on systemd)
+  - "service_mgr"
+
+
+# List of platforms this role supports and was designed for.
+#
+# This list is deliberately smaller than on most other foundata roles: the
+# role requires Podman >= 5.x ("no 4.x") which rules out Debian 12,
+# Ubuntu 22.04/24.04 and the Enterprise Linux 9 family.
+__quadlet_podman_supported_platforms:
+  - name: "Debian"
+    versions:
+      - "13"
+  - name: "Fedora"
+    versions:
+      - "43"
+      - "44"
+  - name: "openSUSE Leap"
+    versions:
+      - "16.0"
+  - name: "RedHat" # includes AlmaLinux, Rocky and CentOS Stream
+    versions:
+      - "10"
+  - name: "Ubuntu"
+    versions:
+      - "26.04"
+
+
+# List of package names to be installed when quadlet_podman_state is
+# set to "present". This role manages no packages (Podman is provided by the
+# foundata.podman.host role); kept empty for the shared setup boilerplate.
+__quadlet_podman_packages_install: []
+
+
+# List of package names to be uninstalled when quadlet_podman_state is
+# set to "absent".
+__quadlet_podman_packages_uninstall: "{{ __quadlet_podman_packages_install }}"
+
+
+# List of package names to be removed unconditionally before installation
+# (e.g., to prevent conflicts or resolve incompatibilities).
+__quadlet_podman_packages_removal: []
+
+
+# List of paths of files and directories to be removed unconditionally after
+# installation. This is useful for removing default configuration resources
+# that would otherwise create confusion or conflict with custom configurations
+# managed by this role.
+__quadlet_podman_paths_removal: []
+
+
+# Dictionary of files to be overwritten with a managed comment instead of being
+# deleted. Keys are file paths; values are the single-line comment characters to
+# use. This is needed on platforms where the package manager reinstalls deleted
+# files on package update. Restored files would conflict with the managed
+# configuration, while modified files are preserved. For example, RPM with
+# %config(noreplace) restores missing files but preserves modified ones.
+__quadlet_podman_paths_neutralize: {}
+
+
+# Minimum Podman version this role supports (checked at runtime in
+# tasks/init.yml; quadlet_podman_min_podman_version can raise it per
+# application). "artifact" units additionally require Podman >= 5.7.
+__quadlet_podman_min_podman_version: "5.0.0"
+__quadlet_podman_artifact_min_podman_version: "5.7.0"
+
+
+# Whether the application gets deployed rootless (user scope) instead of
+# rootful (system scope). Derived from quadlet_podman_user; empty = rootful.
+#
+# Lazy / late-bound evaluation: Jinja renders this variable on access.
+__quadlet_podman_rootless: >-
+  {{
+    (quadlet_podman_user | ansible.builtin.length) > 0
+  }}
+
+
+# Directory the Quadlet unit files are written to. systemd's Quadlet generator
+# reads /etc/containers/systemd/ (system scope) and
+# ~/.config/containers/systemd/ (user scope). The rootless home directory is
+# resolved in tasks/init.yml (__quadlet_podman_user_home).
+__quadlet_podman_unit_dir_path: >-
+  {{
+    (__quadlet_podman_user_home ~ '/.config/containers/systemd')
+    if (__quadlet_podman_rootless | ansible.builtin.bool)
+    else '/etc/containers/systemd'
+  }}
+
+
+# Ownership and permissions of the Quadlet unit directory and files. For the
+# user scope the owner/group get resolved in tasks/init.yml.
+__quadlet_podman_unit_dir_mode: "u=rwx,g=rx,o=" # 0750
+__quadlet_podman_unit_file_mode: "u=rw,g=r,o=" # 0640
+__quadlet_podman_file_owner: >-
+  {{
+    quadlet_podman_user
+    if (__quadlet_podman_rootless | ansible.builtin.bool)
+    else 'root'
+  }}
+__quadlet_podman_file_group: >-
+  {{
+    __quadlet_podman_user_gid
+    if (__quadlet_podman_rootless | ansible.builtin.bool)
+    else 'root'
+  }}
+
+
+# Default ownership and permissions for quadlet_podman_directories and
+# quadlet_podman_files entries (item values take precedence).
+__quadlet_podman_dir_default_mode: "u=rwx,g=rx,o=" # 0750
+__quadlet_podman_managed_file_default_mode: "u=rw,g=r,o=" # 0640
+
+
+# Marker line written into every Quadlet unit file created by this role. Used
+# to re-identify the application's files later (cleanup of units removed from
+# quadlet_podman_units, full removal on state "absent"). Files without the
+# marker or with another application's marker are never touched.
+__quadlet_podman_file_marker: "# Managed by Ansible (foundata.podman.quadlet): app={{ quadlet_podman_app }}"
+
+
+# All Quadlet file extensions the systemd generator knows about; used to find
+# candidate files during cleanup.
+__quadlet_podman_unit_extensions:
+  - "container"
+  - "pod"
+  - "volume"
+  - "network"
+  - "kube"
+  - "image"
+  - "build"
+  - "artifact"
+
+
+# Suffix of the systemd service unit generated from a Quadlet file, per unit
+# type: <name><suffix>.service (see "man podman-systemd.unit").
+__quadlet_podman_service_suffix_map:
+  container: ""
+  kube: ""
+  pod: "-pod"
+  volume: "-volume"
+  network: "-network"
+  image: "-image"
+  build: "-build"
+  artifact: "-artifact"
+
+
+# Section name every unit type expects for its type-specific settings; also
+# defines the canonical section rendering order (Unit, type section, Service,
+# Install, everything else as supplied).
+__quadlet_podman_type_section_map:
+  container: "Container"
+  pod: "Pod"
+  volume: "Volume"
+  network: "Network"
+  kube: "Kube"
+  image: "Image"
+  build: "Build"
+  artifact: "Artifact"
+
+
+# [Unit] settings whose values reference other units; values matching the name
+# of another entry in quadlet_podman_units get expanded to that unit's
+# generated service name by the template.
+__quadlet_podman_dependency_keys:
+  - "After"
+  - "Requires"
+  - "Wants"
+  - "BindsTo"
+  - "PartOf"
+  - "Before"
+
+
+# Services of the application in start order (pods first, so member containers
+# find their pod service on start); derived from the effective unit list built
+# in tasks/init.yml. Only units carrying an Install section are started or
+# stopped explicitly (volumes/networks/images start on demand as dependencies).
+#
+# Lazy / late-bound evaluation: Jinja renders these variables on access, after
+# tasks/init.yml sets __quadlet_podman_units_effective.
+__quadlet_podman_services_managed: >-
+  {{
+    (__quadlet_podman_units_effective | ansible.builtin.selectattr('type', 'eq', 'pod')
+     | ansible.builtin.selectattr('has_install') | ansible.builtin.map(attribute='service') | ansible.builtin.list)
+    + (__quadlet_podman_units_effective | ansible.builtin.rejectattr('type', 'eq', 'pod')
+       | ansible.builtin.selectattr('has_install') | ansible.builtin.map(attribute='service') | ansible.builtin.list)
+  }}
+
+
+# Authentication file for registry logins. The podman default for the
+# respective scope lives below the runtime directory (XDG_RUNTIME_DIR) and
+# would be lost on reboot; a persistent path keeps pulls by the generated
+# services and by podman-auto-update working.
+__quadlet_podman_authfile_path: >-
+  {{
+    (__quadlet_podman_user_home ~ '/.config/containers/auth.json')
+    if (__quadlet_podman_rootless | ansible.builtin.bool)
+    else '/etc/containers/auth.json'
+  }}
+
+
+# Scope abstraction for tasks and handlers that talk to Podman or systemd:
+# rootful work runs as root against the system instance, rootless work runs as
+# the target account against its user instance (XDG_RUNTIME_DIR and the bus
+# address must point at the account's runtime directory for systemctl --user
+# and podman to reach the right instance). Using these variables keeps one
+# task set for both scopes.
+#
+# Lazy / late-bound evaluation: Jinja renders these variables on access, after
+# tasks/init.yml resolves the account facts.
+__quadlet_podman_become_user: >-
+  {{
+    quadlet_podman_user
+    if (__quadlet_podman_rootless | ansible.builtin.bool)
+    else 'root'
+  }}
+__quadlet_podman_systemd_scope: >-
+  {{
+    'user' if (__quadlet_podman_rootless | ansible.builtin.bool) else 'system'
+  }}
+__quadlet_podman_task_environment: >-
+  {{
+    {
+      'XDG_RUNTIME_DIR': '/run/user/' ~ __quadlet_podman_user_uid,
+      'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/user/' ~ __quadlet_podman_user_uid ~ '/bus',
+    }
+    if (__quadlet_podman_rootless | ansible.builtin.bool)
+    else {}
+  }}
+
+
+### Executable paths (never hard-coded inline; override per platform if needed)
+
+__quadlet_podman_podman_exec_path: "/usr/bin/podman"
+__quadlet_podman_grep_exec_path: "/usr/bin/grep"
+__quadlet_podman_systemctl_exec_path: "/usr/bin/systemctl"
+
+
+### Override defaults of dependencies used by this role (if any).
+
+# nothing right now

@@ -1,0 +1,40 @@
+# Handlers: Tasks that are triggered and run only when notified.
+
+---
+
+# Both handlers run in the scope of the application (system instance for
+# rootful, the target account's user instance for rootless), so they carry the
+# same become/environment plumbing as the tasks (see vars/main.yml).
+
+- name: "Handlers | systemd daemon-reload"
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+    scope: "{{ __quadlet_podman_systemd_scope }}"
+  become: true
+  become_user: "{{ __quadlet_podman_become_user }}"
+  environment: "{{ __quadlet_podman_task_environment }}"
+  listen:
+    - "quadlet_podman: systemd daemon-reload"
+
+
+# Containers only pick up changed unit or environment files when their service
+# gets restarted. Restarts happen in start order (pods first); services are
+# started (not just restarted) if they were not running.
+- name: "Handlers | Restart application services"
+  ansible.builtin.systemd_service:
+    name: "{{ __quadlet_podman_service_item }}"
+    state: "restarted"
+    scope: "{{ __quadlet_podman_systemd_scope }}"
+  become: true
+  become_user: "{{ __quadlet_podman_become_user }}"
+  environment: "{{ __quadlet_podman_task_environment }}"
+  when:
+    - quadlet_podman_state == 'present'
+    - quadlet_podman_service_state in ['enabled', 'running']
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+  loop: "{{ __quadlet_podman_services_managed }}"
+  loop_control:
+    loop_var: "__quadlet_podman_service_item"
+    label: "{{ __quadlet_podman_service_item }}"
+  listen:
+    - "quadlet_podman: restart application services"

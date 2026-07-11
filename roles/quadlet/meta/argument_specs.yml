@@ -293,12 +293,14 @@ argument_specs:
           the `Container` section, e.g.
           `Secret: "zammad_db_password,type=env,target=POSTGRES_PASSWORD"`.
 
-          Example:
+          Example (reference a vaulted variable instead of a literal value in
+          real deployments; note that Jinja expressions cannot be shown in this
+          description as Ansible templates it during argument validation):
 
           ```yaml
           quadlet_podman_secrets:
             - name: "zammad_db_password"
-              value: "{{ vault_zammad_db_password }}"
+              value: "place-a-vaulted-value-here"
           ```
         type: "list"
         elements: "dict"
@@ -341,13 +343,14 @@ argument_specs:
           from private registries; the credentials are also used by the
           automatic image updates (`AutoUpdate=registry`).
 
-          Example:
+          Example (reference a vaulted variable instead of a literal value in
+          real deployments):
 
           ```yaml
           quadlet_podman_registry_auth:
             - registry: "registry.example.com"
               username: "deploy"
-              password: "{{ vault_registry_password }}"
+              password: "place-a-vaulted-value-here"
           ```
         type: "list"
         elements: "dict"

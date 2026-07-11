@@ -1,0 +1,177 @@
+# Uninstall: Manage basic resource removal, such as packages or service users.
+
+---
+
+# Removes the application: its services get stopped, the Quadlet unit files
+# (identified by the application marker, so this works even when
+# quadlet_podman_units changed since deployment), secrets and managed files
+# get removed. Host directories (quadlet_podman_directories) and named volumes
+# are deliberately KEPT to protect persistent application data.
+
+- name: "Setup | Uninstall | Notify about a missing rootless account"
+  ansible.builtin.debug:
+    msg: >-
+      The account '{{ quadlet_podman_user }}' (quadlet_podman_user) does not
+      exist (anymore); there is nothing to remove for it.
+  when:
+    - __quadlet_podman_rootless | ansible.builtin.bool
+    - not (__quadlet_podman_user_exists | ansible.builtin.bool)
+
+
+- name: "Setup | Uninstall | Remove the application"
+  when:
+    - __quadlet_podman_user_exists | ansible.builtin.bool
+  block:
+
+    - name: "Setup | Uninstall | Find Quadlet unit files in the unit directory"
+      ansible.builtin.find:
+        paths:
+          - "{{ __quadlet_podman_unit_dir_path }}"
+        patterns: "{{ __quadlet_podman_unit_extensions | ansible.builtin.map('ansible.builtin.regex_replace', '^', '*.') | ansible.builtin.list }}"
+        file_type: "file"
+      register: __quadlet_podman_find_result
+
+
+    - name: "Setup | Uninstall | Determine the unit files of the application"
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [__quadlet_podman_grep_exec_path, '-l', '-s', '--', __quadlet_podman_file_marker]
+            + (__quadlet_podman_find_result['files'] | ansible.builtin.map(attribute='path') | ansible.builtin.list)
+          }}
+      register: __quadlet_podman_owned_result
+      changed_when: false
+      failed_when:
+        - __quadlet_podman_owned_result['rc'] not in [0, 1, 2]
+      when:
+        - (__quadlet_podman_find_result['files'] | ansible.builtin.length) > 0
+
+
+    # Stop order: member containers and other units first, pods last (stopping
+    # a pod also stops its members, but this keeps the shutdown graceful).
+    - name: "Setup | Uninstall | Stop the services of the application"
+      ansible.builtin.systemd_service:
+        name: "{{ __quadlet_podman_owned_service }}"
+        state: "stopped"
+        scope: "{{ __quadlet_podman_systemd_scope }}"
+      become: true
+      become_user: "{{ __quadlet_podman_become_user }}"
+      environment: "{{ __quadlet_podman_task_environment }}"
+      vars:
+        __quadlet_podman_owned_stem: "{{ __quadlet_podman_owned_path | ansible.builtin.basename | ansible.builtin.splitext | ansible.builtin.first }}"
+        __quadlet_podman_owned_ext: >-
+          {{
+            __quadlet_podman_owned_path
+            | ansible.builtin.basename
+            | ansible.builtin.splitext
+            | ansible.builtin.last
+            | ansible.builtin.regex_replace('^\.', '')
+          }}
+        __quadlet_podman_owned_service: "{{ __quadlet_podman_owned_stem }}{{ __quadlet_podman_service_suffix_map[__quadlet_podman_owned_ext] }}.service"
+      # tolerate services that are not loaded (unit was never started or the
+      # generator rejected it)
+      failed_when: false
+      when:
+        - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+      loop: >-
+        {{
+          (__quadlet_podman_owned_result['stdout_lines'] | ansible.builtin.default([])
+           | ansible.builtin.reject('search', '\.pod$') | ansible.builtin.list)
+          + (__quadlet_podman_owned_result['stdout_lines'] | ansible.builtin.default([])
+             | ansible.builtin.select('search', '\.pod$') | ansible.builtin.list)
+        }}
+      loop_control:
+        loop_var: "__quadlet_podman_owned_path"
+        label: "{{ __quadlet_podman_owned_path }}"
+
+
+    # Clear a possible "failed" state so the unit does not stay pinned in
+    # systemd after its file is removed and the daemon reloaded.
+    - name: "Setup | Uninstall | Clear the failed state of the services"
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [__quadlet_podman_systemctl_exec_path]
+            + (['--user'] if (__quadlet_podman_rootless | ansible.builtin.bool) else [])
+            + ['reset-failed', __quadlet_podman_owned_service]
+          }}
+      become: true
+      become_user: "{{ __quadlet_podman_become_user }}"
+      environment: "{{ __quadlet_podman_task_environment }}"
+      vars:
+        __quadlet_podman_owned_stem: "{{ __quadlet_podman_owned_path | ansible.builtin.basename | ansible.builtin.splitext | ansible.builtin.first }}"
+        __quadlet_podman_owned_ext: >-
+          {{
+            __quadlet_podman_owned_path
+            | ansible.builtin.basename
+            | ansible.builtin.splitext
+            | ansible.builtin.last
+            | ansible.builtin.regex_replace('^\.', '')
+          }}
+        __quadlet_podman_owned_service: "{{ __quadlet_podman_owned_stem }}{{ __quadlet_podman_service_suffix_map[__quadlet_podman_owned_ext] }}.service"
+      changed_when: false
+      # tolerate services systemd does not know (unit was never started)
+      failed_when: false
+      when:
+        - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+      loop: "{{ __quadlet_podman_owned_result['stdout_lines'] | ansible.builtin.default([]) }}"
+      loop_control:
+        loop_var: "__quadlet_podman_owned_path"
+        label: "{{ __quadlet_podman_owned_path }}"
+
+
+    - name: "Setup | Uninstall | Remove the unit files of the application"
+      ansible.builtin.file:
+        path: "{{ __quadlet_podman_owned_path }}"
+        state: "absent"
+      loop: "{{ __quadlet_podman_owned_result['stdout_lines'] | ansible.builtin.default([]) }}"
+      loop_control:
+        loop_var: "__quadlet_podman_owned_path"
+        label: "{{ __quadlet_podman_owned_path }}"
+      notify:
+        - "quadlet_podman: systemd daemon-reload"
+
+
+    - name: "Setup | Uninstall | Apply pending systemd changes"
+      ansible.builtin.meta: "flush_handlers"
+
+
+    - name: "Setup | Uninstall | Check the Podman executable is available"
+      ansible.builtin.stat:
+        path: "{{ __quadlet_podman_podman_exec_path }}"
+      register: __quadlet_podman_exec_stat
+
+
+    - name: "Setup | Uninstall | Remove the Podman secrets of the application"
+      containers.podman.podman_secret:
+        name: "{{ __quadlet_podman_secret_item['name'] }}"
+        state: "absent"
+        executable: "{{ __quadlet_podman_podman_exec_path }}"
+      become: true
+      become_user: "{{ __quadlet_podman_become_user }}"
+      environment: "{{ __quadlet_podman_task_environment }}"
+      when:
+        - __quadlet_podman_exec_stat['stat']['exists']
+      loop: "{{ quadlet_podman_secrets }}"
+      loop_control:
+        loop_var: "__quadlet_podman_secret_item"
+      no_log: true # secret values must not be leaked into logs or diffs
+
+
+    - name: "Setup | Uninstall | Remove the managed files of the application"
+      ansible.builtin.file:
+        path: "{{ __quadlet_podman_file_item['dest'] }}"
+        state: "absent"
+      loop: "{{ quadlet_podman_files }}"
+      loop_control:
+        loop_var: "__quadlet_podman_file_item"
+        label: "{{ __quadlet_podman_file_item['dest'] }}"
+
+
+- name: "Setup | Uninstall | Remove packages"
+  ansible.builtin.package:
+    name: "{{ __quadlet_podman_packages_uninstall }}"
+    state: "absent"
+  when:
+    - __quadlet_podman_packages_uninstall is ansible.builtin.defined
+    - (__quadlet_podman_packages_uninstall | ansible.builtin.length) > 0
