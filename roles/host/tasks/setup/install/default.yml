@@ -1,0 +1,79 @@
+# Install: Manage basic resource setup, such as packages or service users.
+
+---
+
+- name: "Setup | Install | Default | Remove unwanted packages (e.g., to prevent conflicts or resolve incompatibilities)"
+  ansible.builtin.package:
+    name: "{{ __host_podman_packages_removal }}"
+    state: "absent"
+  when:
+    - __host_podman_packages_removal is ansible.builtin.defined
+    - (__host_podman_packages_removal | ansible.builtin.length) > 0
+
+
+- name: "Setup | Install | Default | Install or upgrade packages"
+  ansible.builtin.package:
+    name: "{{ __host_podman_packages_install }}"
+    state: "{{ 'latest' if host_podman_autoupgrade else 'present' }}"
+  when:
+    - __host_podman_packages_install is ansible.builtin.defined
+    - (__host_podman_packages_install | ansible.builtin.length) > 0
+
+
+- name: "Setup | Install | Default | Install or upgrade the Docker compatibility package"
+  ansible.builtin.package:
+    name: "{{ __host_podman_docker_compat_package }}"
+    state: "{{ 'latest' if host_podman_autoupgrade else 'present' }}"
+  when:
+    - host_podman_docker_compat
+
+
+- name: "Setup | Install | Default | Remove the Docker compatibility package (host_podman_docker_compat is false)"
+  ansible.builtin.package:
+    name: "{{ __host_podman_docker_compat_package }}"
+    state: "absent"
+  when:
+    - not host_podman_docker_compat
+
+
+- name: "Setup | Install | Default | Remove unwanted files and directories (e.g., to prevent conflicts or resolve incompatibilities)"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: "absent"
+  when:
+    - __host_podman_paths_removal is ansible.builtin.defined
+    - (__host_podman_paths_removal | ansible.builtin.length) > 0
+  loop: "{{ __host_podman_paths_removal }}"
+
+
+- name: "Setup | Install | Default | Neutralize distribution config files (overwrite to survive package updates)"
+  ansible.builtin.copy:
+    dest: "{{ item['key'] }}"
+    content: |
+      {{ item['value'] }} Managed by Ansible (foundata.podman.host)
+      {{ item['value'] }}
+      {{ item['value'] }} Content intentionally cleared. The original distribution file conflicted
+      {{ item['value'] }} with configuration managed by the foundata.podman.host role.
+      {{ item['value'] }}
+      {{ item['value'] }} To restore the original file content, reinstall the owning package:
+      {% if (ansible_facts['os_family'] | ansible.builtin.lower) == 'debian' %}
+      {{ item['value'] }}   dpkg -S '{{ item['key'] }}'"  # find the package that owns this file
+      {{ item['value'] }}   apt-get install --reinstall <package>  # reinstall it to restore the original
+      {% elif (ansible_facts['os_family'] | ansible.builtin.lower) == 'suse' %}
+      {{ item['value'] }}   rpm -qf '{{ item['key'] }}'  # find the package that owns this file
+      {{ item['value'] }}   zypper install --force <package>  # reinstall it to restore the original
+      {% elif (ansible_facts['os_family'] | ansible.builtin.lower) == 'redhat' %}
+      {{ item['value'] }}   rpm -qf '{{ item['key'] }}'  # find the package that owns this file
+      {{ item['value'] }}   dnf reinstall <package>  # reinstall it to restore the original
+      {% else %}
+      {{ item['value'] }}   Use your package manager to find the owning package and reinstall it.
+      {% endif %}
+    owner: "root"
+    group: "root"
+    mode: "u=rw,g=r,o=r" # 0644
+  when:
+    - __host_podman_paths_neutralize is ansible.builtin.defined
+    - (__host_podman_paths_neutralize | ansible.builtin.length) > 0
+  loop: "{{ __host_podman_paths_neutralize | ansible.builtin.dict2items }}"
+  loop_control:
+    label: "{{ item['key'] }}"

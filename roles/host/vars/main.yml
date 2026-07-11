@@ -1,0 +1,315 @@
+# Internal role variables and values that must NOT be overridden by the user.
+#
+# Variables defined here usually override earlier definitions due to the high
+# precedence of this file. Each variable should have a concise comment above
+# it, describing its purpose and how it fits into the role's functionality.
+
+---
+
+# List of facts used by the role (gathered on a best-effort basis if needed).
+#
+# To identify which subset a fact belongs to during development, you can use
+# the following snippet:
+#
+# - ansible.builtin.setup:
+#     gather_subset:
+#       - '!min'
+#       - '<subset_name, see parameter doc for details>'
+__host_podman_used_facts:
+  # from subset "distribution"
+  - "distribution"
+  - "distribution_major_version"
+  - "distribution_version"
+  - "os_family"
+  # from subset "service_mgr" (the role manages systemd timers/sockets and
+  # gates several tasks on ansible_facts['service_mgr'])
+  - "service_mgr"
+  # from subset "selinux" (SELinux file context management is gated on
+  # ansible_facts['selinux']['status'])
+  - "selinux"
+
+
+# List of platforms this role supports and was designed for.
+#
+# This list is deliberately smaller than on most other foundata roles: the
+# role requires Podman >= 5.x ("no 4.x") which rules out Debian 12,
+# Ubuntu 22.04/24.04 and the Enterprise Linux 9 family.
+__host_podman_supported_platforms:
+  - name: "Debian"
+    versions:
+      - "13"
+  - name: "Fedora"
+    versions:
+      - "43"
+      - "44"
+  - name: "openSUSE Leap"
+    versions:
+      - "16.0"
+  - name: "RedHat" # includes AlmaLinux, Rocky and CentOS Stream
+    versions:
+      - "10"
+  - name: "Ubuntu"
+    versions:
+      - "26.04"
+
+
+# Minimum Podman version this role supports. Checked at runtime after package
+# installation ("distribution is supported" does not guarantee a new-enough
+# Podman, e.g. with pinned or third-party repositories).
+__host_podman_min_podman_version: "5.0.0"
+
+
+# Base list of package names providing Podman and its companion tooling. The
+# package names are identical on all supported platforms (verified against
+# Debian 13, Ubuntu 26.04, Fedora 43/44, AlmaLinux 10, CentOS Stream 10 and
+# openSUSE Leap 16.0).
+#
+# - netavark / aardvark-dns: the network stack (CNI was removed in Podman 6).
+# - passt: provides "pasta", the rootless network backend (slirp4netns was
+#   removed in Podman 6).
+# - catatonit: minimal init for containers (--init and some healthchecks).
+__host_podman_packages_install_base:
+  - "podman"
+  - "netavark"
+  - "aardvark-dns"
+  - "passt"
+  - "catatonit"
+
+
+# Additional platform-specific packages (e.g. rootless prerequisites that are
+# part of other core packages elsewhere). Populated in vars/<platform>.yml.
+__host_podman_packages_install_extra: []
+
+
+# List of package names to be installed when host_podman_state is
+# set to "present".
+#
+# Lazy / late-bound evaluation: Jinja renders this variable on access,
+# after tasks/init.yml loads the platform vars file that sets the inputs.
+__host_podman_packages_install: >-
+  {{
+    __host_podman_packages_install_base
+    + __host_podman_packages_install_extra
+  }}
+
+
+# Package providing the Docker compatibility layer ("docker" command alias).
+# Managed separately from the base list via host_podman_docker_compat; same
+# name on all supported platforms.
+__host_podman_docker_compat_package: "podman-docker"
+
+
+# List of package names to be uninstalled when host_podman_state is set to
+# "absent". The platform-specific extras (e.g. "uidmap", "dbus-user-session"
+# on Debian/Ubuntu) are shared infrastructure other software may rely on and
+# are deliberately NOT removed.
+__host_podman_packages_uninstall: >-
+  {{
+    __host_podman_packages_install_base
+    + [__host_podman_docker_compat_package]
+  }}
+
+
+# List of package names to be removed unconditionally before installation
+# (e.g., to prevent conflicts or resolve incompatibilities).
+__host_podman_packages_removal: []
+
+
+# List of paths of files and directories to be removed unconditionally after
+# installation. This is useful for removing default configuration resources
+# that would otherwise create confusion or conflict with custom configurations
+# managed by this role.
+__host_podman_paths_removal: []
+
+
+# Dictionary of files to be overwritten with a managed comment instead of being
+# deleted. Keys are file paths; values are the single-line comment characters to
+# use. This is needed on platforms where the package manager reinstalls deleted
+# files on package update. Restored files would conflict with the managed
+# configuration, while modified files are preserved. For example, RPM with
+# %config(noreplace) restores missing files but preserves modified ones.
+__host_podman_paths_neutralize: {}
+
+
+# Packages providing the "semanage" tooling needed for SELinux file context
+# management. Populated in vars/<platform>.yml for platforms using SELinux;
+# only installed when the SELinux management tasks actually run.
+__host_podman_selinux_tools_packages: []
+
+
+### Engine configuration files
+#
+# Managed strictly opt-in: when the effective settings dictionary is empty
+# (the default), the role does not touch or create the corresponding file, so
+# a default installation keeps the distribution's stock behavior.
+#
+# containers.conf and registries.conf support drop-in directories, so the role
+# owns a single drop-in file and the distribution files stay untouched.
+# storage.conf and policy.json have no drop-in mechanism; they are only
+# (over)written when settings are supplied.
+
+# Populated via the defaults/overwrite layering below: os_family vars files
+# define base values in ..._defaults; per-version vars files override
+# individual entries in ..._overwrite. The effective settings are the
+# deep-merge of both plus the user-supplied values (highest precedence).
+__host_podman_containers_defaults: {}
+__host_podman_containers_overwrite: {}
+# Lazy / late-bound evaluation: Jinja renders this variable on access,
+# after tasks/init.yml loads the platform vars file that sets the inputs.
+__host_podman_containers_effective: >-
+  {{
+    __host_podman_containers_defaults
+    | ansible.builtin.combine(__host_podman_containers_overwrite, recursive=true)
+    | ansible.builtin.combine(host_podman_containers, recursive=true)
+  }}
+
+__host_podman_registries_defaults: {}
+__host_podman_registries_overwrite: {}
+__host_podman_registries_effective: >-
+  {{
+    __host_podman_registries_defaults
+    | ansible.builtin.combine(__host_podman_registries_overwrite, recursive=true)
+    | ansible.builtin.combine(host_podman_registries, recursive=true)
+  }}
+
+# storage.conf gets fully rendered (no drop-in support in containers-storage),
+# so the defaults carry the upstream base values to keep the resulting file
+# complete and valid. Only rendered when the user supplied settings.
+__host_podman_storage_defaults:
+  storage:
+    driver: "overlay"
+    runroot: "/run/containers/storage"
+    graphroot: "/var/lib/containers/storage"
+__host_podman_storage_overwrite: {}
+__host_podman_storage_effective: >-
+  {{
+    __host_podman_storage_defaults
+    | ansible.builtin.combine(__host_podman_storage_overwrite, recursive=true)
+    | ansible.builtin.combine(host_podman_storage, recursive=true)
+  }}
+
+
+# Marker line written into every configuration file created by this role.
+# Used to re-identify role-managed files on uninstall (files without the
+# marker, e.g. distribution defaults, are never removed).
+__host_podman_file_marker: "# Managed by Ansible (foundata.podman.host)"
+
+
+# System-wide configuration file and drop-in paths.
+__host_podman_containers_dropin_dir_path: "/etc/containers/containers.conf.d"
+__host_podman_containers_dropin_file_path: "{{ __host_podman_containers_dropin_dir_path }}/50-managed.conf"
+__host_podman_registries_dropin_dir_path: "/etc/containers/registries.conf.d"
+__host_podman_registries_dropin_file_path: "{{ __host_podman_registries_dropin_dir_path }}/50-managed.conf"
+__host_podman_storage_file_path: "/etc/containers/storage.conf"
+__host_podman_policy_file_path: "/etc/containers/policy.json"
+
+__host_podman_config_dir_owner: "root"
+__host_podman_config_dir_group: "root"
+__host_podman_config_dir_mode: "u=rwx,g=rx,o=rx" # 0755
+
+__host_podman_config_file_owner: "root"
+__host_podman_config_file_group: "root"
+__host_podman_config_file_mode: "u=rw,g=r,o=r" # 0644
+
+
+### Automatic container image updates (podman-auto-update.timer)
+
+# Internal default configuration for the systemd timer drop-in. User values
+# from host_podman_auto_update_timer_settings are merged on top of these.
+# See host_podman_auto_update_timer_settings in defaults/main.yml for a
+# detailed description of the structure (as this variable is using the same).
+__host_podman_auto_update_timer_settings_defaults:
+  OnCalendar: "daily"
+  RandomizedDelaySec: "60m"
+  Persistent: true
+
+
+# Effective systemd timer settings: the defaults above with the user-supplied
+# host_podman_auto_update_timer_settings merged on top. systemd directives are
+# case-sensitive, as are Ansible dict keys, so a plain combine() lets user
+# values override defaults without extra handling.
+#
+# Lazy / late-bound evaluation: Jinja renders this variable on access,
+# after tasks/init.yml loads the platform vars file that sets the inputs.
+__host_podman_auto_update_timer_settings_effective: >-
+  {{
+    __host_podman_auto_update_timer_settings_defaults
+    | ansible.builtin.combine(host_podman_auto_update_timer_settings)
+  }}
+
+
+# Name of the vendor systemd timer unit that triggers "podman auto-update"
+# (shipped with the podman package on all supported platforms; also available
+# as a per-user unit for rootless usage).
+__host_podman_auto_update_timer_unit_name: "podman-auto-update.timer"
+
+
+# systemd timer drop-in override directory and file used to apply the schedule
+# from host_podman_auto_update_timer_settings to the system timer.
+__host_podman_auto_update_timer_dropin_dir_path: "/etc/systemd/system/{{ __host_podman_auto_update_timer_unit_name }}.d"
+__host_podman_auto_update_timer_dropin_dir_owner: "root"
+__host_podman_auto_update_timer_dropin_dir_group: "root"
+__host_podman_auto_update_timer_dropin_dir_mode: "u=rwx,g=rx,o=rx" # 0755
+
+__host_podman_auto_update_timer_dropin_file_path: "{{ __host_podman_auto_update_timer_dropin_dir_path }}/00-managed.conf"
+__host_podman_auto_update_timer_dropin_file_owner: "root"
+__host_podman_auto_update_timer_dropin_file_group: "root"
+__host_podman_auto_update_timer_dropin_file_mode: "u=rw,g=r,o=r" # 0644
+
+
+# Name of the systemd socket unit providing the Docker-compatible API
+# (managed when host_podman_docker_compat is true).
+__host_podman_api_socket_unit_name: "podman.socket"
+
+
+### Rootless enablement (host_podman_rootless_users)
+
+# Internal defaults for every host_podman_rootless_users entry; the item's own
+# values are merged on top and take precedence.
+__host_podman_rootless_user_defaults:
+  state: "present"
+  linger: true
+  auto_update: true
+  containers: {}
+  storage: {}
+  registries: {}
+
+
+# Subordinate UID/GID range size allocated when an account has no range yet
+# and no explicit one was given (matches the shadow-utils default of 65536
+# IDs per user). Allocation starts at the floor when both files are empty.
+__host_podman_subid_count: 65536
+__host_podman_subid_floor: 100000
+
+__host_podman_subuid_file_path: "/etc/subuid"
+__host_podman_subgid_file_path: "/etc/subgid"
+__host_podman_subid_file_owner: "root"
+__host_podman_subid_file_group: "root"
+__host_podman_subid_file_mode: "u=rw,g=r,o=r" # 0644
+
+
+# Flag files systemd-logind maintains for lingering users; used for an
+# idempotent check as "loginctl show-user" fails for users without an active
+# session or lingering.
+__host_podman_linger_dir_path: "/var/lib/systemd/linger"
+
+
+# Per-user configuration directory (relative to the account's home directory)
+# and modes for the files rendered from the rootless user entry's
+# containers/storage/registries dictionaries.
+__host_podman_user_config_dir_relpath: ".config/containers"
+__host_podman_user_config_dir_mode: "u=rwx,g=,o=" # 0700
+__host_podman_user_config_file_mode: "u=rw,g=,o=" # 0600
+
+
+### Executable paths (never hard-coded inline; override per platform if needed)
+
+__host_podman_podman_exec_path: "/usr/bin/podman"
+__host_podman_loginctl_exec_path: "/usr/bin/loginctl"
+__host_podman_restorecon_exec_path: "/usr/sbin/restorecon"
+__host_podman_grep_exec_path: "/usr/bin/grep"
+
+
+### Override defaults of dependencies used by this role (if any).
+
+# nothing right now

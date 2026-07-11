@@ -1,0 +1,55 @@
+# Services and daemons: Manage their state, configure, or create them.
+
+---
+
+# Podman itself is daemonless; the units managed here are the system timer for
+# automatic container image updates and (optionally) the Docker-compatible API
+# socket. The per-user timers of rootless accounts are managed in
+# tasks/config/rootless_user.yml.
+
+- name: "Service | Default | Apply pending systemd changes before managing units"
+  ansible.builtin.meta: "flush_handlers"
+
+
+- name: "Service | Default | Ensure automatic image update timer state: {{ __host_podman_auto_update_timer_unit_name }}"
+  ansible.builtin.systemd_service:
+    name: "{{ __host_podman_auto_update_timer_unit_name }}"
+    state: "{{ 'started' if host_podman_service_state in ['enabled', 'running'] else 'stopped' if host_podman_service_state == 'disabled' }}"
+    enabled: "{{ true if host_podman_service_state == 'enabled' else false if host_podman_service_state in ['disabled', 'running'] }}"
+  when:
+    - host_podman_auto_update
+    - host_podman_service_state != 'unmanaged'
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+
+
+- name: "Service | Default | Disable automatic image update timer (host_podman_auto_update is false): {{ __host_podman_auto_update_timer_unit_name }}"
+  ansible.builtin.systemd_service:
+    name: "{{ __host_podman_auto_update_timer_unit_name }}"
+    state: "stopped"
+    enabled: false
+  when:
+    - not host_podman_auto_update
+    - host_podman_service_state != 'unmanaged'
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+
+
+- name: "Service | Default | Ensure Docker-compatible API socket state: {{ __host_podman_api_socket_unit_name }}"
+  ansible.builtin.systemd_service:
+    name: "{{ __host_podman_api_socket_unit_name }}"
+    state: "{{ 'started' if host_podman_service_state in ['enabled', 'running'] else 'stopped' if host_podman_service_state == 'disabled' }}"
+    enabled: "{{ true if host_podman_service_state == 'enabled' else false if host_podman_service_state in ['disabled', 'running'] }}"
+  when:
+    - host_podman_docker_compat
+    - host_podman_service_state != 'unmanaged'
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+
+
+- name: "Service | Default | Disable Docker-compatible API socket (host_podman_docker_compat is false): {{ __host_podman_api_socket_unit_name }}"
+  ansible.builtin.systemd_service:
+    name: "{{ __host_podman_api_socket_unit_name }}"
+    state: "stopped"
+    enabled: false
+  when:
+    - not host_podman_docker_compat
+    - host_podman_service_state != 'unmanaged'
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'

@@ -1,0 +1,79 @@
+# Uninstall: Manage basic resource removal, such as packages or service users.
+
+---
+
+- name: "Setup | Uninstall | Stop and disable the managed systemd units"
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: "stopped"
+    enabled: false
+  # tolerate units that do not exist (e.g. Podman was never installed here)
+  failed_when: false
+  when:
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+  loop:
+    - "{{ __host_podman_auto_update_timer_unit_name }}"
+    - "{{ __host_podman_api_socket_unit_name }}"
+  loop_control:
+    label: "{{ item }}"
+
+
+- name: "Setup | Uninstall | Revert the rootless enablement of the listed accounts"
+  ansible.builtin.include_tasks:
+    file: "{{ role_path }}/tasks/config/rootless_user.yml"
+  vars:
+    __host_podman_ru_force_absent: true
+  loop: "{{ host_podman_rootless_users }}"
+  loop_control:
+    loop_var: "__host_podman_ru_raw"
+    label: "{{ __host_podman_ru_raw['name'] }}"
+
+
+- name: "Setup | Uninstall | Remove the managed configuration drop-ins"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: "absent"
+  loop:
+    - "{{ __host_podman_containers_dropin_file_path }}"
+    - "{{ __host_podman_registries_dropin_file_path }}"
+    - "{{ __host_podman_auto_update_timer_dropin_dir_path }}"
+  loop_control:
+    label: "{{ item }}"
+  notify:
+    - "host_podman: systemd daemon-reload"
+
+
+# storage.conf might be a distribution file this role never touched; only
+# remove it when it carries the role's marker. policy.json is deliberately
+# left alone: JSON cannot carry a marker comment and removing the image trust
+# policy would break any remaining containers tooling.
+- name: "Setup | Uninstall | Check whether storage.conf is role-managed"
+  ansible.builtin.command:
+    argv:
+      - "{{ __host_podman_grep_exec_path }}"
+      - "-l"
+      - "-s" # no error messages about nonexistent files
+      - "{{ __host_podman_file_marker }}"
+      - "{{ __host_podman_storage_file_path }}"
+  register: __host_podman_managed_files_result
+  changed_when: false
+  failed_when:
+    - __host_podman_managed_files_result['rc'] not in [0, 1, 2]
+
+
+- name: "Setup | Uninstall | Remove role-managed storage.conf"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: "absent"
+  loop: "{{ __host_podman_managed_files_result['stdout_lines'] }}"
+  loop_control:
+    label: "{{ item }}"
+
+
+- name: "Setup | Uninstall | Remove packages"
+  ansible.builtin.package:
+    name: "{{ __host_podman_packages_uninstall }}"
+    state: "absent"
+  when:
+    - __host_podman_packages_uninstall is ansible.builtin.defined
+    - (__host_podman_packages_uninstall | ansible.builtin.length) > 0

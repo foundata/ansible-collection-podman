@@ -1,0 +1,11 @@
+{%- from '_podman_macros.j2' import render_toml -%}
+{#-
+  Container image registry configuration (registries.conf version 2 format,
+  see "man containers-registries.conf"). Rendered from a dictionary; the
+  "registry" key (list of dictionaries) becomes [[registry]] entries.
+
+  Input variable: tpl_registries_settings (dict)
+-#}
+{{ tpl_file_marker }}
+# {{ ansible_managed }}
+{{ render_toml(tpl_registries_settings) }}

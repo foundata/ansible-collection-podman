@@ -1,0 +1,17 @@
+# Internal role variables specific to: Debian (os_family or distribution)
+#
+# Only values specific to the platform and its functionality should be included
+# here. Variables in this file override those defined in vars/main.yml.
+
+---
+
+# Rootless prerequisites that are separate packages on Debian/Ubuntu:
+# - uidmap: provides newuidmap/newgidmap (part of shadow-utils elsewhere).
+# - dbus-user-session: session bus for the per-user systemd instance
+#   ("systemctl --user" and rootless podman need a working user manager).
+#
+# Deliberately not part of __host_podman_packages_uninstall: both are shared
+# infrastructure other software may rely on.
+__host_podman_packages_install_extra:
+  - "uidmap"
+  - "dbus-user-session"

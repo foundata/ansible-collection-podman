@@ -1,0 +1,255 @@
+# Configuration: Manage settings, like adapting or creating config files.
+
+---
+
+# "Distribution is supported" does not guarantee a new-enough Podman (pinned
+# or third-party repositories), so check the actually installed version.
+- name: "Config | Default | Determine the installed Podman version"
+  ansible.builtin.command:
+    argv:
+      - "{{ __host_podman_podman_exec_path }}"
+      - "--version"
+  register: __host_podman_version_result
+  changed_when: false
+
+
+- name: "Config | Default | Store the installed Podman version as fact"
+  ansible.builtin.set_fact:
+    __host_podman_version: >-
+      {{
+        __host_podman_version_result['stdout']
+        | ansible.builtin.regex_search('[0-9]+\.[0-9]+(\.[0-9]+)?')
+      }}
+
+
+- name: "Config | Default | Check Podman version requirement and fail if unmet"
+  ansible.builtin.fail:
+    msg: >
+      This role requires Podman {{ __host_podman_min_podman_version }} or higher
+      (several features this collection relies on were removed or replaced after
+      Podman 4.x, e.g. CNI networking and slirp4netns). Podman
+      {{ __host_podman_version }} was found at {{ __host_podman_podman_exec_path }}.
+  when:
+    - __host_podman_version is version_compare(__host_podman_min_podman_version, '<')
+
+
+### Engine configuration files (strictly opt-in, see vars/main.yml)
+
+- name: "Config | Default | Ensure containers.conf drop-in directory exists"
+  ansible.builtin.file:
+    path: "{{ __host_podman_containers_dropin_dir_path }}"
+    state: "directory"
+    owner: "{{ __host_podman_config_dir_owner }}"
+    group: "{{ __host_podman_config_dir_group }}"
+    mode: "{{ __host_podman_config_dir_mode }}"
+  when:
+    - (__host_podman_containers_effective | ansible.builtin.length) > 0
+
+
+- name: "Config | Default | Create containers.conf drop-in"
+  ansible.builtin.template:
+    src: "containers.conf.j2"
+    dest: "{{ __host_podman_containers_dropin_file_path }}"
+    owner: "{{ __host_podman_config_file_owner }}"
+    group: "{{ __host_podman_config_file_group }}"
+    mode: "{{ __host_podman_config_file_mode }}"
+  vars:
+    # Pass (and/or adjust) variables needed for the template
+    tpl_containers_settings: "{{ __host_podman_containers_effective }}"
+    tpl_file_marker: "{{ __host_podman_file_marker }}"
+  when:
+    - (__host_podman_containers_effective | ansible.builtin.length) > 0
+
+
+- name: "Config | Default | Remove containers.conf drop-in (no settings supplied)"
+  ansible.builtin.file:
+    path: "{{ __host_podman_containers_dropin_file_path }}"
+    state: "absent"
+  when:
+    - (__host_podman_containers_effective | ansible.builtin.length) == 0
+
+
+- name: "Config | Default | Ensure registries.conf drop-in directory exists"
+  ansible.builtin.file:
+    path: "{{ __host_podman_registries_dropin_dir_path }}"
+    state: "directory"
+    owner: "{{ __host_podman_config_dir_owner }}"
+    group: "{{ __host_podman_config_dir_group }}"
+    mode: "{{ __host_podman_config_dir_mode }}"
+  when:
+    - (__host_podman_registries_effective | ansible.builtin.length) > 0
+
+
+- name: "Config | Default | Create registries.conf drop-in"
+  ansible.builtin.template:
+    src: "registries.conf.j2"
+    dest: "{{ __host_podman_registries_dropin_file_path }}"
+    owner: "{{ __host_podman_config_file_owner }}"
+    group: "{{ __host_podman_config_file_group }}"
+    mode: "{{ __host_podman_config_file_mode }}"
+  vars:
+    # Pass (and/or adjust) variables needed for the template
+    tpl_registries_settings: "{{ __host_podman_registries_effective }}"
+    tpl_file_marker: "{{ __host_podman_file_marker }}"
+  when:
+    - (__host_podman_registries_effective | ansible.builtin.length) > 0
+
+
+- name: "Config | Default | Remove registries.conf drop-in (no settings supplied)"
+  ansible.builtin.file:
+    path: "{{ __host_podman_registries_dropin_file_path }}"
+    state: "absent"
+  when:
+    - (__host_podman_registries_effective | ansible.builtin.length) == 0
+
+
+# No drop-in mechanism exists for storage.conf, so the complete file gets
+# rendered (distribution base values come from __host_podman_storage_defaults).
+# Without user-supplied settings the distribution file stays untouched.
+- name: "Config | Default | Create storage.conf"
+  ansible.builtin.template:
+    src: "storage.conf.j2"
+    dest: "{{ __host_podman_storage_file_path }}"
+    owner: "{{ __host_podman_config_file_owner }}"
+    group: "{{ __host_podman_config_file_group }}"
+    mode: "{{ __host_podman_config_file_mode }}"
+  vars:
+    # Pass (and/or adjust) variables needed for the template
+    tpl_storage_settings: "{{ __host_podman_storage_effective }}"
+    tpl_file_marker: "{{ __host_podman_file_marker }}"
+  when:
+    - (host_podman_storage | ansible.builtin.length) > 0
+
+
+# policy.json has no drop-in mechanism either; only (over)written when a
+# policy was supplied, otherwise the distribution's stock file stays untouched.
+- name: "Config | Default | Create policy.json (image trust policy)"
+  ansible.builtin.copy:
+    content: "{{ host_podman_policy | ansible.builtin.to_nice_json }}\n"
+    dest: "{{ __host_podman_policy_file_path }}"
+    owner: "{{ __host_podman_config_file_owner }}"
+    group: "{{ __host_podman_config_file_group }}"
+    mode: "{{ __host_podman_config_file_mode }}"
+  when:
+    - (host_podman_policy | ansible.builtin.length) > 0
+
+
+### SELinux file contexts for additional container storage paths
+
+- name: "Config | Default | Manage SELinux file contexts for additional storage paths"
+  when:
+    - host_podman_selinux_manage
+    - ansible_facts['selinux']['status'] | ansible.builtin.default('') == 'enabled'
+    - (host_podman_selinux_label_paths | ansible.builtin.length) > 0
+  block:
+
+    - name: "Config | Default | Install SELinux management tooling"
+      ansible.builtin.package:
+        name: "{{ __host_podman_selinux_tools_packages }}"
+        state: "present"
+      when:
+        - (__host_podman_selinux_tools_packages | ansible.builtin.length) > 0
+
+
+    # File context equivalence: the path gets labeled by the same rules as
+    # /var/lib/containers (the default container storage location), which
+    # covers all sub-paths and label types in one rule.
+    - name: "Config | Default | Set SELinux file context equivalence for storage path"
+      community.general.sefcontext:
+        target: "{{ item }}"
+        substitute: "/var/lib/containers"
+        state: "present"
+        reload: true
+      register: __host_podman_sefcontext_result
+      loop: "{{ host_podman_selinux_label_paths }}"
+
+
+    # Only after the rule (dis)appeared: newly created files inherit the
+    # correct context automatically, and re-running restorecon -F over live
+    # container storage would strip the MCS category labels Podman applies.
+    # A handler is unsuitable as the per-path result gating is needed
+    # (noqa: no-handler).
+    - name: "Config | Default | Apply SELinux file contexts (restorecon)" # noqa: no-handler
+      ansible.builtin.command:
+        argv:
+          - "{{ __host_podman_restorecon_exec_path }}"
+          - "-F" # reset the full context, including the user part
+          - "-r"
+          - "-v"
+          - "{{ item['item'] }}"
+      register: __host_podman_restorecon_result
+      changed_when:
+        - (__host_podman_restorecon_result['stdout'] | ansible.builtin.length) > 0
+      when:
+        - item is ansible.builtin.changed
+      loop: "{{ __host_podman_sefcontext_result['results'] }}"
+      loop_control:
+        label: "{{ item['item'] }}"
+
+
+### Automatic container image updates (system podman-auto-update.timer)
+
+- name: "Config | Default | Manage systemd timer drop-in for automatic image updates"
+  when:
+    - host_podman_auto_update
+    - host_podman_service_state != 'unmanaged'
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+  block:
+
+    - name: "Config | Default | Ensure systemd timer override directory exists"
+      ansible.builtin.file:
+        path: "{{ __host_podman_auto_update_timer_dropin_dir_path }}"
+        state: "directory"
+        owner: "{{ __host_podman_auto_update_timer_dropin_dir_owner }}"
+        group: "{{ __host_podman_auto_update_timer_dropin_dir_group }}"
+        mode: "{{ __host_podman_auto_update_timer_dropin_dir_mode }}"
+      notify:
+        - "host_podman: systemd daemon-reload"
+
+
+    - name: "Config | Default | Create systemd timer drop-in config file"
+      ansible.builtin.template:
+        src: "systemd_timer.conf.j2"
+        dest: "{{ __host_podman_auto_update_timer_dropin_file_path }}"
+        owner: "{{ __host_podman_auto_update_timer_dropin_file_owner }}"
+        group: "{{ __host_podman_auto_update_timer_dropin_file_group }}"
+        mode: "{{ __host_podman_auto_update_timer_dropin_file_mode }}"
+      vars:
+        # Pass (and/or adjust) variables needed for the template
+        tpl_timer_settings: "{{ __host_podman_auto_update_timer_settings_effective }}"
+      notify:
+        - "host_podman: systemd daemon-reload"
+
+
+- name: "Config | Default | Remove systemd timer drop-in (automatic image updates not managed)"
+  ansible.builtin.file:
+    path: "{{ __host_podman_auto_update_timer_dropin_dir_path }}"
+    state: "absent"
+  when:
+    - not host_podman_auto_update
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+  notify:
+    - "host_podman: systemd daemon-reload"
+
+
+- name: "Config | Default | Warn about unsupported service manager for timer configuration"
+  ansible.builtin.debug:
+    msg: >-
+      Automatic image update timer management is only supported with systemd as
+      service manager. The current service manager '{{ ansible_facts['service_mgr'] }}'
+      is not supported; no update timer gets managed.
+  when:
+    - host_podman_auto_update
+    - host_podman_service_state != 'unmanaged'
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) != 'systemd'
+
+
+### Rootless enablement for listed user accounts
+
+- name: "Config | Default | Enable rootless Podman usage per listed account"
+  ansible.builtin.include_tasks:
+    file: "{{ role_path }}/tasks/config/rootless_user.yml"
+  loop: "{{ host_podman_rootless_users }}"
+  loop_control:
+    loop_var: "__host_podman_ru_raw"
+    label: "{{ __host_podman_ru_raw['name'] }}"

@@ -1,0 +1,13 @@
+{%- from '_podman_macros.j2' import render_toml -%}
+{#-
+  Container storage configuration (storage.conf format, see
+  "man containers-storage.conf"). Rendered from a dictionary of TOML sections.
+  Unlike containers.conf/registries.conf there is no drop-in mechanism, so the
+  role renders the complete file (including the [storage] base values from
+  __host_podman_storage_defaults).
+
+  Input variable: tpl_storage_settings (dict)
+-#}
+{{ tpl_file_marker }}
+# {{ ansible_managed }}
+{{ render_toml(tpl_storage_settings) }}

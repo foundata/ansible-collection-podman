@@ -1,0 +1,15 @@
+# Internal role variables specific to: Suse (os_family or distribution)
+#
+# Only values specific to the platform and its functionality should be included
+# here. Variables in this file override those defined in vars/main.yml.
+#
+# Note: openSUSE Leap 16.0 uses SELinux (not AppArmor) as its default mandatory
+# access control system, so the SELinux tooling applies here as well.
+
+---
+
+# Provides "semanage" for SELinux file context management. Only installed when
+# the SELinux management tasks actually run (host_podman_selinux_manage is true,
+# SELinux is active and host_podman_selinux_label_paths is non-empty).
+__host_podman_selinux_tools_packages:
+  - "policycoreutils-python-utils"

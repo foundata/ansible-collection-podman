@@ -1,0 +1,10 @@
+{%- from '_podman_macros.j2' import render_toml -%}
+{#-
+  Podman container engine configuration (containers.conf format, see
+  "man containers.conf"). Rendered from a dictionary of TOML sections.
+
+  Input variable: tpl_containers_settings (dict)
+-#}
+{{ tpl_file_marker }}
+# {{ ansible_managed }}
+{{ render_toml(tpl_containers_settings) }}

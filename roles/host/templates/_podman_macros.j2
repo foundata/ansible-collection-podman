@@ -1,0 +1,74 @@
+{#-
+  Jinja2 helper macros for rendering the containers/podman TOML configuration
+  files (containers.conf, storage.conf, registries.conf) from dictionaries.
+
+  Value typing rules (TOML):
+  - Booleans are rendered as true/false.
+  - Numbers are rendered bare.
+  - Strings are rendered double-quoted (backslashes and quotes get escaped).
+  - Lists are rendered as inline arrays; each item is typed by the same rules.
+-#}
+
+{%- macro render_toml_value(value) -%}
+{%-   if value is ansible.builtin.boolean -%}
+{{ value | ansible.builtin.ternary('true', 'false') }}
+{%-   elif value is ansible.builtin.number -%}
+{{ value }}
+{%-   elif value is ansible.builtin.sequence and value is not ansible.builtin.string -%}
+[{% for item in value %}{{ render_toml_value(item) }}{% if not loop.last %}, {% endif %}{% endfor %}]
+{%-   else -%}
+"{{ value | ansible.builtin.string | ansible.builtin.replace('\\', '\\\\') | ansible.builtin.replace('"', '\\"') }}"
+{%-   endif -%}
+{%- endmacro -%}
+
+
+{#-
+  Render one TOML table ("[name]" section): scalar and list values first,
+  nested dictionaries recursively as dotted sub-tables ("[name.sub]").
+-#}
+{%- macro render_toml_section(name, data) -%}
+[{{ name }}]
+{%  for key, value in data.items() if value is not ansible.builtin.mapping %}
+{{ key }} = {{ render_toml_value(value) }}
+{%  endfor %}
+{%- for key, value in data.items() if value is ansible.builtin.mapping %}
+
+{{ render_toml_section(name ~ '.' ~ key, value) }}
+{%- endfor -%}
+{%- endmacro -%}
+
+
+{#-
+  Render a complete TOML document from a dictionary:
+  1. Top-level scalar/list keys (e.g. "unqualified-search-registries") first,
+     as TOML requires them before any table header.
+  2. Dictionary values as "[key]" tables (recursing into "[key.sub]").
+  3. Lists of dictionaries as "[[key]]" arrays of tables (e.g. "registry"
+     mirror entries in registries.conf).
+-#}
+{%- macro render_toml(data) -%}
+{#-   Note: Jinja's "sequence" test also matches mappings, so every list check
+      here additionally excludes mappings explicitly. -#}
+{%-   for key, value in data.items()
+        if (value is not ansible.builtin.mapping)
+        and not (value is ansible.builtin.sequence and value is not ansible.builtin.string
+                 and (value | ansible.builtin.length) > 0 and value[0] is ansible.builtin.mapping) %}
+{{ key }} = {{ render_toml_value(value) }}
+{%    endfor %}
+{%- for key, value in data.items() if value is ansible.builtin.mapping %}
+
+{{ render_toml_section(key, value) }}
+{%- endfor -%}
+{%- for key, value in data.items()
+      if (value is not ansible.builtin.mapping)
+      and (value is ansible.builtin.sequence and value is not ansible.builtin.string
+           and (value | ansible.builtin.length) > 0 and value[0] is ansible.builtin.mapping) %}
+{%-   for entry in value %}
+
+[[{{ key }}]]
+{%      for entry_key, entry_value in entry.items() %}
+{{ entry_key }} = {{ render_toml_value(entry_value) }}
+{%      endfor %}
+{%-   endfor -%}
+{%- endfor -%}
+{%- endmacro -%}

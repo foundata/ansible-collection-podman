@@ -1,0 +1,321 @@
+# Configuration: Enable (or revert) rootless Podman usage for one user account
+# from host_podman_rootless_users. Included in a loop from config/default.yml
+# (loop_var: __host_podman_ru_raw) and from setup/uninstall/default.yml (which
+# additionally sets __host_podman_ru_force_absent to revert the enablement).
+
+---
+
+- name: "Config | Rootless | Merge defaults with the entry for '{{ __host_podman_ru_raw['name'] }}'"
+  ansible.builtin.set_fact:
+    __host_podman_ru: >-
+      {{
+        __host_podman_rootless_user_defaults
+        | ansible.builtin.combine(__host_podman_ru_raw, recursive=true)
+        | ansible.builtin.combine(
+            {'state': 'absent'} if (__host_podman_ru_force_absent | ansible.builtin.default(false)) else {},
+            recursive=true
+          )
+      }}
+
+
+- name: "Config | Rootless | Query the account '{{ __host_podman_ru['name'] }}'"
+  ansible.builtin.getent:
+    database: "passwd"
+    key: "{{ __host_podman_ru['name'] }}"
+    fail_key: false
+
+
+- name: "Config | Rootless | Check the existence of the account '{{ __host_podman_ru['name'] }}'"
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['getent_passwd'][__host_podman_ru['name']] is not none
+    fail_msg: >-
+      The account '{{ __host_podman_ru['name'] }}' from host_podman_rootless_users
+      does not exist. This role does not create accounts; create it beforehand
+      (e.g. with the foundata.linux.user role).
+    quiet: true
+  when:
+    - __host_podman_ru['state'] == 'present'
+
+
+- name: "Config | Rootless | Check whether lingering is enabled for '{{ __host_podman_ru['name'] }}'"
+  ansible.builtin.stat:
+    path: "{{ __host_podman_linger_dir_path }}/{{ __host_podman_ru['name'] }}"
+  register: __host_podman_ru_linger_stat
+
+
+### Revert enablement (entry state "absent" or role uninstall)
+
+- name: "Config | Rootless | Revert rootless enablement for '{{ __host_podman_ru['name'] }}'"
+  when:
+    - __host_podman_ru['state'] == 'absent'
+  block:
+
+    - name: "Config | Rootless | Disable lingering for '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.command:
+        argv:
+          - "{{ __host_podman_loginctl_exec_path }}"
+          - "disable-linger"
+          - "{{ __host_podman_ru['name'] }}"
+      changed_when: true
+      when:
+        - __host_podman_ru_linger_stat['stat']['exists']
+
+
+    - name: "Config | Rootless | Remove managed per-user configuration files of '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.file:
+        path: "{{ __host_podman_ru_home }}/{{ __host_podman_user_config_dir_relpath }}/{{ item }}"
+        state: "absent"
+      vars:
+        __host_podman_ru_home: "{{ ansible_facts['getent_passwd'][__host_podman_ru['name']][4] }}"
+      when:
+        - ansible_facts['getent_passwd'][__host_podman_ru['name']] is not none
+      loop:
+        - "containers.conf"
+        - "storage.conf"
+        - "registries.conf"
+      loop_control:
+        label: "{{ item }}"
+
+    # Subordinate ID ranges and the account itself are deliberately kept
+    # (shared account properties; removing them is out of scope, see the
+    # host_podman_rootless_users documentation).
+
+
+### Enablement (entry state "present")
+
+- name: "Config | Rootless | Enable rootless Podman usage for '{{ __host_podman_ru['name'] }}'"
+  when:
+    - __host_podman_ru['state'] == 'present'
+  vars:
+    __host_podman_ru_uid: "{{ ansible_facts['getent_passwd'][__host_podman_ru['name']][1] }}"
+    __host_podman_ru_gid: "{{ ansible_facts['getent_passwd'][__host_podman_ru['name']][2] }}"
+    __host_podman_ru_home: "{{ ansible_facts['getent_passwd'][__host_podman_ru['name']][4] }}"
+  block:
+
+    ## Subordinate UID/GID ranges (required for the user namespace mapping)
+
+    - name: "Config | Rootless | Read existing subordinate ID assignments"
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      register: __host_podman_ru_subid_slurp
+      failed_when:
+        # tolerate missing files (treated as empty below); lineinfile creates them
+        - __host_podman_ru_subid_slurp['msg'] is ansible.builtin.defined
+        - "'file not found' not in (__host_podman_ru_subid_slurp['msg'] | ansible.builtin.lower)"
+      loop:
+        - "{{ __host_podman_subuid_file_path }}"
+        - "{{ __host_podman_subgid_file_path }}"
+      loop_control:
+        label: "{{ item }}"
+
+
+    - name: "Config | Rootless | Compute subordinate ID facts for '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.set_fact:
+        __host_podman_ru_subuid_present: >-
+          {{
+            __host_podman_ru_subid_content[0]
+            | ansible.builtin.split('\n')
+            | ansible.builtin.select('match', '^' ~ (__host_podman_ru['name'] | ansible.builtin.regex_escape) ~ ':')
+            | ansible.builtin.length > 0
+          }}
+        __host_podman_ru_subgid_present: >-
+          {{
+            __host_podman_ru_subid_content[1]
+            | ansible.builtin.split('\n')
+            | ansible.builtin.select('match', '^' ~ (__host_podman_ru['name'] | ansible.builtin.regex_escape) ~ ':')
+            | ansible.builtin.length > 0
+          }}
+        # Next free range start: the highest end of all existing ranges in both
+        # files (ranges are "name:start:count", so end = start + count), with
+        # __host_podman_subid_floor as the lower bound.
+        __host_podman_ru_subid_next_start: >-
+          {%- set __ns = namespace(maxend=__host_podman_subid_floor) -%}
+          {%- for __line in (__host_podman_ru_subid_content[0] ~ '\n' ~ __host_podman_ru_subid_content[1]).split('\n') -%}
+          {%-   set __parts = __line.split(':') -%}
+          {%-   if (__parts | ansible.builtin.length) == 3
+                   and (__parts[1] is ansible.builtin.match('^[0-9]+$'))
+                   and (__parts[2] is ansible.builtin.match('^[0-9]+$')) -%}
+          {%-     set __end = (__parts[1] | int) + (__parts[2] | int) -%}
+          {%-     if __end > __ns.maxend -%}
+          {%-       set __ns.maxend = __end -%}
+          {%-     endif -%}
+          {%-   endif -%}
+          {%- endfor -%}
+          {{ __ns.maxend }}
+      vars:
+        __host_podman_ru_subid_content: >-
+          {{
+            __host_podman_ru_subid_slurp['results']
+            | ansible.builtin.map(attribute='content', default='')
+            | ansible.builtin.map('ansible.builtin.b64decode')
+            | ansible.builtin.list
+          }}
+
+
+    - name: "Config | Rootless | Ensure subordinate UID range for '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.lineinfile:
+        path: "{{ __host_podman_subuid_file_path }}"
+        regexp: "^{{ __host_podman_ru['name'] | ansible.builtin.regex_escape }}:"
+        line: "{{ __host_podman_ru['name'] }}:{{ __host_podman_ru_subuid_range }}"
+        create: true
+        owner: "{{ __host_podman_subid_file_owner }}"
+        group: "{{ __host_podman_subid_file_group }}"
+        mode: "{{ __host_podman_subid_file_mode }}"
+      vars:
+        __host_podman_ru_subuid_range: >-
+          {{
+            __host_podman_ru['subuid']
+            | ansible.builtin.default(__host_podman_ru_subid_next_start ~ ':' ~ __host_podman_subid_count)
+          }}
+      when:
+        # enforce explicit ranges; leave existing automatic assignments alone
+        - (__host_podman_ru['subuid'] is ansible.builtin.defined) or (not __host_podman_ru_subuid_present)
+
+
+    - name: "Config | Rootless | Ensure subordinate GID range for '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.lineinfile:
+        path: "{{ __host_podman_subgid_file_path }}"
+        regexp: "^{{ __host_podman_ru['name'] | ansible.builtin.regex_escape }}:"
+        line: "{{ __host_podman_ru['name'] }}:{{ __host_podman_ru_subgid_range }}"
+        create: true
+        owner: "{{ __host_podman_subid_file_owner }}"
+        group: "{{ __host_podman_subid_file_group }}"
+        mode: "{{ __host_podman_subid_file_mode }}"
+      vars:
+        __host_podman_ru_subgid_range: >-
+          {{
+            __host_podman_ru['subgid']
+            | ansible.builtin.default(__host_podman_ru_subid_next_start ~ ':' ~ __host_podman_subid_count)
+          }}
+      when:
+        # enforce explicit ranges; leave existing automatic assignments alone
+        - (__host_podman_ru['subgid'] is ansible.builtin.defined) or (not __host_podman_ru_subgid_present)
+
+
+    ## Lingering (persistent per-user systemd instance, required for services
+    ## that start at boot and survive logout)
+
+    - name: "Config | Rootless | Enable lingering for '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.command:
+        argv:
+          - "{{ __host_podman_loginctl_exec_path }}"
+          - "enable-linger"
+          - "{{ __host_podman_ru['name'] }}"
+      changed_when: true
+      when:
+        - __host_podman_ru['linger']
+        - not __host_podman_ru_linger_stat['stat']['exists']
+        - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+
+
+    - name: "Config | Rootless | Linger is false, disable lingering for '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.command:
+        argv:
+          - "{{ __host_podman_loginctl_exec_path }}"
+          - "disable-linger"
+          - "{{ __host_podman_ru['name'] }}"
+      changed_when: true
+      when:
+        - not __host_podman_ru['linger']
+        - __host_podman_ru_linger_stat['stat']['exists']
+        - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+
+
+    - name: "Config | Rootless | Wait for the user runtime directory of '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.wait_for:
+        path: "/run/user/{{ __host_podman_ru_uid }}"
+        timeout: 30
+      when:
+        - __host_podman_ru['linger']
+        - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+
+
+    ## Per-user configuration files (~/.config/containers/)
+
+    - name: "Config | Rootless | Ensure the per-user configuration directory for '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.file:
+        path: "{{ __host_podman_ru_home }}/{{ __host_podman_user_config_dir_relpath }}"
+        state: "directory"
+        owner: "{{ __host_podman_ru['name'] }}"
+        group: "{{ __host_podman_ru_gid }}"
+        mode: "{{ __host_podman_user_config_dir_mode }}"
+      when: >-
+        ((__host_podman_ru['containers'] | ansible.builtin.length) > 0)
+        or ((__host_podman_ru['storage'] | ansible.builtin.length) > 0)
+        or ((__host_podman_ru['registries'] | ansible.builtin.length) > 0)
+
+
+    # Unlike the system-wide storage.conf, the per-user files render only the
+    # supplied settings: missing keys fall back to Podman's rootless built-in
+    # defaults (rendering the rootful base paths here would be harmful).
+    - name: "Config | Rootless | Create per-user configuration file for '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.template:
+        src: "{{ __host_podman_ru_cfg_item['template'] }}"
+        dest: "{{ __host_podman_ru_home }}/{{ __host_podman_user_config_dir_relpath }}/{{ __host_podman_ru_cfg_item['filename'] }}"
+        owner: "{{ __host_podman_ru['name'] }}"
+        group: "{{ __host_podman_ru_gid }}"
+        mode: "{{ __host_podman_user_config_file_mode }}"
+      vars:
+        # Pass (and/or adjust) variables needed for the template
+        tpl_containers_settings: "{{ __host_podman_ru['containers'] }}"
+        tpl_storage_settings: "{{ __host_podman_ru['storage'] }}"
+        tpl_registries_settings: "{{ __host_podman_ru['registries'] }}"
+        tpl_file_marker: "{{ __host_podman_file_marker }}"
+      when:
+        - (__host_podman_ru[__host_podman_ru_cfg_item['key']] | ansible.builtin.length) > 0
+      loop:
+        - key: "containers"
+          template: "containers.conf.j2"
+          filename: "containers.conf"
+        - key: "storage"
+          template: "storage.conf.j2"
+          filename: "storage.conf"
+        - key: "registries"
+          template: "registries.conf.j2"
+          filename: "registries.conf"
+      loop_control:
+        loop_var: "__host_podman_ru_cfg_item"
+        label: "{{ __host_podman_ru_cfg_item['filename'] }}"
+
+
+    - name: "Config | Rootless | Remove unset per-user configuration files of '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.file:
+        path: "{{ __host_podman_ru_home }}/{{ __host_podman_user_config_dir_relpath }}/{{ __host_podman_ru_cfg_item['filename'] }}"
+        state: "absent"
+      when:
+        - (__host_podman_ru[__host_podman_ru_cfg_item['key']] | ansible.builtin.length) == 0
+      loop:
+        - key: "containers"
+          filename: "containers.conf"
+        - key: "storage"
+          filename: "storage.conf"
+        - key: "registries"
+          filename: "registries.conf"
+      loop_control:
+        loop_var: "__host_podman_ru_cfg_item"
+        label: "{{ __host_podman_ru_cfg_item['filename'] }}"
+
+
+    ## Per-user automatic image updates (podman-auto-update.timer, user scope)
+
+    # Needs the per-user systemd instance, therefore gated on lingering.
+    # XDG_RUNTIME_DIR (and the bus address) must point at the user's runtime
+    # directory for systemctl --user to reach the right instance.
+    - name: "Config | Rootless | Ensure per-user automatic image update timer state for '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.systemd_service:
+        name: "{{ __host_podman_auto_update_timer_unit_name }}"
+        scope: "user"
+        state: "{{ 'started' if (__host_podman_ru_timer_on and host_podman_service_state in ['enabled', 'running']) else 'stopped' }}"
+        enabled: "{{ true if (__host_podman_ru_timer_on and host_podman_service_state == 'enabled') else false }}"
+      become: true
+      become_user: "{{ __host_podman_ru['name'] }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ __host_podman_ru_uid }}"
+        DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ __host_podman_ru_uid }}/bus"
+      vars:
+        __host_podman_ru_timer_on: "{{ __host_podman_ru['auto_update'] | ansible.builtin.bool }}"
+      when:
+        - __host_podman_ru['linger']
+        - host_podman_service_state != 'unmanaged'
+        - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
