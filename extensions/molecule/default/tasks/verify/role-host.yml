@@ -1,0 +1,102 @@
+# Verify the state after the "host" role converge.
+
+- name: "Molecule | Verify | host | Determine the installed Podman version"
+  ansible.builtin.command:
+    argv:
+      - "/usr/bin/podman"
+      - "--version"
+  register: __testing_host_podman_version_result
+  changed_when: false
+
+
+- name: "Molecule | Verify | host | Check Podman is installed and new enough"
+  ansible.builtin.assert:
+    that:
+      - __testing_host_podman_version_result['rc'] == 0
+      - >-
+        (__testing_host_podman_version_result['stdout']
+         | ansible.builtin.regex_search('[0-9]+\.[0-9]+(\.[0-9]+)?'))
+        is version_compare('5.0.0', '>=')
+    quiet: true
+
+
+- name: "Molecule | Verify | host | Read the containers.conf drop-in"
+  ansible.builtin.slurp:
+    src: "/etc/containers/containers.conf.d/50-managed.conf"
+  register: __testing_host_containers_dropin_slurp
+
+
+- name: "Molecule | Verify | host | Check the containers.conf drop-in content"
+  ansible.builtin.assert:
+    that:
+      - "'[containers]' in __testing_host_containers_dropin_content"
+      - "'log_driver = \"journald\"' in __testing_host_containers_dropin_content"
+      - "'Managed by Ansible (foundata.podman.host)' in __testing_host_containers_dropin_content"
+    quiet: true
+  vars:
+    __testing_host_containers_dropin_content: "{{ __testing_host_containers_dropin_slurp['content'] | ansible.builtin.b64decode }}"
+
+
+- name: "Molecule | Verify | host | Read the automatic image update timer drop-in"
+  ansible.builtin.slurp:
+    src: "/etc/systemd/system/podman-auto-update.timer.d/00-managed.conf"
+  register: __testing_host_timer_dropin_slurp
+
+
+- name: "Molecule | Verify | host | Check the automatic image update timer drop-in content"
+  ansible.builtin.assert:
+    that:
+      - "'[Timer]' in __testing_host_timer_dropin_content"
+      - "'OnCalendar=daily' in __testing_host_timer_dropin_content"
+      - "'RandomizedDelaySec=30m' in __testing_host_timer_dropin_content"
+      - "'Persistent=true' in __testing_host_timer_dropin_content"
+    quiet: true
+  vars:
+    __testing_host_timer_dropin_content: "{{ __testing_host_timer_dropin_slurp['content'] | ansible.builtin.b64decode }}"
+
+
+- name: "Molecule | Verify | host | Query the automatic image update timer state"
+  ansible.builtin.command:
+    argv:
+      - "systemctl"
+      - "is-enabled"
+      - "podman-auto-update.timer"
+  register: __testing_host_timer_enabled_result
+  changed_when: false
+
+
+- name: "Molecule | Verify | host | Check the automatic image update timer is enabled"
+  ansible.builtin.assert:
+    that:
+      - __testing_host_timer_enabled_result['stdout'] == 'enabled'
+    quiet: true
+
+
+- name: "Molecule | Verify | host | Check lingering and subordinate IDs of the rootless account"
+  block:
+
+    - name: "Molecule | Verify | host | Check the linger flag of the rootless account"
+      ansible.builtin.stat:
+        path: "/var/lib/systemd/linger/containerapp"
+      register: __testing_host_linger_stat
+
+
+    - name: "Molecule | Verify | host | Query the subordinate ID assignments of the rootless account"
+      ansible.builtin.command:
+        argv:
+          - "/usr/bin/grep"
+          - "-E"
+          - "^containerapp:"
+          - "/etc/subuid"
+          - "/etc/subgid"
+      register: __testing_host_subid_result
+      changed_when: false
+
+
+    - name: "Molecule | Verify | host | Check the rootless prerequisites"
+      ansible.builtin.assert:
+        that:
+          - __testing_host_linger_stat['stat']['exists']
+          - __testing_host_subid_result['rc'] == 0
+          - (__testing_host_subid_result['stdout_lines'] | ansible.builtin.length) == 2
+        quiet: true

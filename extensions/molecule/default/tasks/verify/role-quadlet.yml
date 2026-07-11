@@ -1,0 +1,136 @@
+# Verify the state after the "quadlet" role converge (the rootful "webtest"
+# and the rootless "usertest" application).
+
+### Rootful application ("webtest")
+
+- name: "Molecule | Verify | quadlet | Read the webtest container unit file"
+  ansible.builtin.slurp:
+    src: "/etc/containers/systemd/webtest.container"
+  register: __testing_quadlet_webtest_unit_slurp
+
+
+- name: "Molecule | Verify | quadlet | Check the webtest container unit content"
+  ansible.builtin.assert:
+    that:
+      # ownership marker (load-bearing for the cleanup logic)
+      - "'Managed by Ansible (foundata.podman.quadlet): app=webtest' in __testing_quadlet_webtest_unit_content"
+      - "'Image=quay.io/libpod/testimage:20241011' in __testing_quadlet_webtest_unit_content"
+      - "'Secret=webtest_secret,type=env,target=WEBTEST_SECRET' in __testing_quadlet_webtest_unit_content"
+      # dependency expansion: "webtest-data" (volume) -> webtest-data-volume.service
+      - "'After=webtest-data-volume.service' in __testing_quadlet_webtest_unit_content"
+      # unit defaults merged into the [Service] section
+      - "'Restart=on-failure' in __testing_quadlet_webtest_unit_content"
+    quiet: true
+  vars:
+    __testing_quadlet_webtest_unit_content: "{{ __testing_quadlet_webtest_unit_slurp['content'] | ansible.builtin.b64decode }}"
+
+
+- name: "Molecule | Verify | quadlet | Query the webtest service state"
+  ansible.builtin.command:
+    argv:
+      - "systemctl"
+      - "is-active"
+      - "webtest.service"
+  register: __testing_quadlet_webtest_active_result
+  changed_when: false
+
+
+- name: "Molecule | Verify | quadlet | Check the webtest service is active"
+  ansible.builtin.assert:
+    that:
+      - __testing_quadlet_webtest_active_result['stdout'] == 'active'
+    quiet: true
+
+
+- name: "Molecule | Verify | quadlet | Query the Podman secrets"
+  ansible.builtin.command:
+    argv:
+      - "/usr/bin/podman"
+      - "secret"
+      - "ls"
+      - "--format"
+      - "{{ '{{.Name}}' }}"
+  register: __testing_quadlet_secret_result
+  changed_when: false
+
+
+- name: "Molecule | Verify | quadlet | Check the webtest secret exists"
+  ansible.builtin.assert:
+    that:
+      - "'webtest_secret' in __testing_quadlet_secret_result['stdout_lines']"
+    quiet: true
+
+
+- name: "Molecule | Verify | quadlet | Read the webtest environment file"
+  ansible.builtin.slurp:
+    src: "/var/lib/webtest/app.env"
+  register: __testing_quadlet_webtest_env_slurp
+
+
+- name: "Molecule | Verify | quadlet | Check the webtest environment file content"
+  ansible.builtin.assert:
+    that:
+      - "'WEBTEST_GREETING=hello' in (__testing_quadlet_webtest_env_slurp['content'] | ansible.builtin.b64decode)"
+    quiet: true
+
+
+### Rootless application ("usertest", account "containerapp")
+
+- name: "Molecule | Verify | quadlet | Read the usertest container unit file (rootless)"
+  ansible.builtin.slurp:
+    src: "/var/lib/podman/containerapp/.config/containers/systemd/usertest.container"
+  register: __testing_quadlet_usertest_unit_slurp
+
+
+- name: "Molecule | Verify | quadlet | Check the usertest container unit content (rootless)"
+  ansible.builtin.assert:
+    that:
+      - "'Managed by Ansible (foundata.podman.quadlet): app=usertest' in __testing_quadlet_usertest_unit_content"
+      - "'Image=quay.io/libpod/testimage:20241011' in __testing_quadlet_usertest_unit_content"
+    quiet: true
+  vars:
+    __testing_quadlet_usertest_unit_content: "{{ __testing_quadlet_usertest_unit_slurp['content'] | ansible.builtin.b64decode }}"
+
+
+- name: "Molecule | Verify | quadlet | Determine the UID of the rootless account"
+  ansible.builtin.getent:
+    database: "passwd"
+    key: "containerapp"
+
+
+# The rootless START is not testable on all platforms in this nested testing
+# environment; see the comment in tasks/converge/role-quadlet.yml (must match
+# the list used there).
+- name: "Molecule | Verify | quadlet | Set the platforms without nested rootless start support"
+  ansible.builtin.set_fact:
+    __testing_quadlet_rootless_start_excluded:
+      - "molecule-almalinux10"
+      - "molecule-centosstream10"
+      - "molecule-opensuseleap160"
+
+
+- name: "Molecule | Verify | quadlet | Query the usertest service state (rootless)"
+  ansible.builtin.command:
+    argv:
+      - "systemctl"
+      - "--user"
+      - "is-active"
+      - "usertest.service"
+  become: true
+  become_user: "containerapp"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts['getent_passwd']['containerapp'][1] }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ ansible_facts['getent_passwd']['containerapp'][1] }}/bus"
+  register: __testing_quadlet_usertest_active_result
+  changed_when: false
+  when:
+    - inventory_hostname not in __testing_quadlet_rootless_start_excluded
+
+
+- name: "Molecule | Verify | quadlet | Check the usertest service is active (rootless)"
+  ansible.builtin.assert:
+    that:
+      - __testing_quadlet_usertest_active_result['stdout'] == 'active'
+    quiet: true
+  when:
+    - inventory_hostname not in __testing_quadlet_rootless_start_excluded

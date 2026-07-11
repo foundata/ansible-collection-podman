@@ -1,0 +1,88 @@
+# Execute the collection role "quadlet" against all driver-created instances:
+# one rootful application ("webtest") and one rootless application ("usertest",
+# running as the account created in role-host.yml).
+
+- name: "Molecule | Converge | Include the foundata.podman.quadlet role (rootful application)"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "webtest"
+    quadlet_podman_state: "present"
+    quadlet_podman_service_state: "enabled"
+    quadlet_podman_directories:
+      - path: "/var/lib/webtest"
+    quadlet_podman_files:
+      - dest: "/var/lib/webtest/app.env"
+        content: |
+          WEBTEST_GREETING=hello
+    quadlet_podman_secrets:
+      - name: "webtest_secret"
+        value: "molecule-test-value"
+    quadlet_podman_unit_defaults:
+      container:
+        Service:
+          Restart: "on-failure"
+    quadlet_podman_units:
+      - name: "webtest-data"
+        type: "volume"
+        sections:
+          Volume:
+            VolumeName: "webtest-data"
+      - name: "webtest"
+        type: "container"
+        sections:
+          Unit:
+            Description: "Molecule webtest container"
+            After:
+              - "webtest-data"
+          Container:
+            ContainerName: "webtest"
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "top"
+            Volume:
+              - "webtest-data.volume:/data"
+            EnvironmentFile:
+              - "/var/lib/webtest/app.env"
+            Secret:
+              - "webtest_secret,type=env,target=WEBTEST_SECRET"
+          Install:
+            WantedBy:
+              - "multi-user.target"
+
+
+# The Podman builds of Enterprise Linux 10 and openSUSE Leap 16 cannot START
+# rootless containers under the nested conditions of this testing environment
+# (molecule instances are rootless containers themselves). Everything else
+# (unit rendering, secrets, user-scope systemd handling) still gets tested
+# there via service state "disabled"; the actual rootless start is covered by
+# the other platforms and by testing against real VMs.
+- name: "Molecule | Converge | Include the foundata.podman.quadlet role (rootless application)"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "usertest"
+    quadlet_podman_state: "present"
+    quadlet_podman_service_state: >-
+      {{
+        'disabled'
+        if inventory_hostname in __testing_quadlet_rootless_start_excluded
+        else 'enabled'
+      }}
+    __testing_quadlet_rootless_start_excluded:
+      - "molecule-almalinux10"
+      - "molecule-centosstream10"
+      - "molecule-opensuseleap160"
+    quadlet_podman_user: "containerapp"
+    quadlet_podman_units:
+      - name: "usertest"
+        type: "container"
+        sections:
+          Unit:
+            Description: "Molecule usertest container (rootless)"
+          Container:
+            ContainerName: "usertest"
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "top"
+          Install:
+            WantedBy:
+              - "default.target"

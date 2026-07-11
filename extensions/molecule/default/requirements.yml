@@ -1,0 +1,9 @@
+# Ansible Galaxy dependencies required for the Molecule "default" scenario.
+
+---
+
+roles: []
+
+collections:
+  - "containers.podman"
+  - "community.general"

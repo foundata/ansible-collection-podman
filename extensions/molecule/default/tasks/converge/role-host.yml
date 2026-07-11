@@ -1,0 +1,36 @@
+# Execute the collection role "host" against all driver-created instances.
+
+# The rootless test account is created here (the role does not create
+# accounts; foundata.linux.user would do this in real deployments).
+- name: "Molecule | Converge | Create the rootless test account"
+  ansible.builtin.user:
+    name: "containerapp"
+    state: "present"
+    system: true
+    home: "/var/lib/podman/containerapp"
+    create_home: true
+    shell: "/bin/bash"
+    password: "!"
+
+
+- name: "Molecule | Converge | Include the foundata.podman.host role"
+  ansible.builtin.include_role:
+    name: "foundata.podman.host"
+  vars:
+    host_podman_state: "present"
+    host_podman_service_state: "enabled"
+    host_podman_containers:
+      containers:
+        log_driver: "journald"
+    host_podman_auto_update_timer_settings:
+      RandomizedDelaySec: "30m"
+    host_podman_selinux_label_paths:
+      - "/var/lib/podman"
+    host_podman_rootless_users:
+      - name: "containerapp"
+        # Explicit low range: the molecule instances are containers with only
+        # 65536 mapped UIDs, so the automatically allocated range (starting at
+        # 100000) would not exist inside them. Real target systems (VMs, bare
+        # metal) do not need this.
+        subuid: "20000:20000"
+        subgid: "20000:20000"
