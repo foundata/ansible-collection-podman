@@ -221,12 +221,15 @@
         - "host_podman: systemd daemon-reload"
 
 
-- name: "Config | Default | Remove systemd timer drop-in (automatic image updates not managed)"
+# Also removed when service_state is "unmanaged": the role then fully backs off,
+# so its schedule override is dropped and the vendor timer schedule takes over
+# (otherwise a stale drop-in from an earlier managed run would linger).
+- name: "Config | Default | Remove systemd timer drop-in (image updates disabled or service unmanaged)"
   ansible.builtin.file:
     path: "{{ __host_podman_auto_update_timer_dropin_dir_path }}"
     state: "absent"
   when:
-    - not host_podman_auto_update
+    - (not host_podman_auto_update) or (host_podman_service_state == 'unmanaged')
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
   notify:
     - "host_podman: systemd daemon-reload"

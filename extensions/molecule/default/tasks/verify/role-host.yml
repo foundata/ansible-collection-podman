@@ -47,12 +47,39 @@
   ansible.builtin.assert:
     that:
       - "'[Timer]' in __testing_host_timer_dropin_content"
-      - "'OnCalendar=daily' in __testing_host_timer_dropin_content"
+      - "'OnCalendar=*-*-* 04:00:00' in __testing_host_timer_dropin_content"
       - "'RandomizedDelaySec=30m' in __testing_host_timer_dropin_content"
       - "'Persistent=true' in __testing_host_timer_dropin_content"
     quiet: true
   vars:
     __testing_host_timer_dropin_content: "{{ __testing_host_timer_dropin_slurp['content'] | ansible.builtin.b64decode }}"
+
+
+- name: "Molecule | Verify | host | Get the effective calendar schedule of the image update timer"
+  ansible.builtin.command:
+    argv:
+      - "systemctl"
+      - "show"
+      - "--property=TimersCalendar"
+      - "podman-auto-update.timer"
+  register: __testing_host_timer_calendar
+  changed_when: false
+
+
+- name: "Molecule | Verify | host | Check the drop-in replaces the vendor schedule instead of accumulating"
+  ansible.builtin.assert:
+    that:
+      # OnCalendar is list-typed: without a reset line the drop-in schedule adds
+      # to the vendor's (daily). Exactly one entry, at the configured time.
+      - "'04:00:00' in __testing_host_timer_calendar['stdout']"
+      - "(__testing_host_timer_calendar['stdout'] | ansible.builtin.regex_findall('OnCalendar=') | ansible.builtin.length) == 1"
+    fail_msg: >-
+      podman-auto-update.timer has an unexpected effective schedule: the drop-in
+      must replace the vendor OnCalendar, not add to it. Got
+      '{{ __testing_host_timer_calendar['stdout'] }}'.
+    success_msg: >-
+      podman-auto-update.timer runs only on the configured schedule
+      ('{{ __testing_host_timer_calendar['stdout'] }}').
 
 
 - name: "Molecule | Verify | host | Query the automatic image update timer state"
