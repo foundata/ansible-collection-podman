@@ -6,7 +6,8 @@
 
 ---
 
-# List of facts used by the role (gathered on a best-effort basis if needed).
+# Facts used by the role (gathered on a best-effort basis if needed), as a
+# mapping of "gather_subset" name to the ansible_facts keys it provides.
 #
 # To identify which subset a fact belongs to during development, you can use
 # the following snippet:
@@ -16,17 +17,19 @@
 #       - '!min'
 #       - '<subset_name, see parameter doc for details>'
 __host_podman_used_facts:
-  # from subset "distribution"
-  - "distribution"
-  - "distribution_major_version"
-  - "distribution_version"
-  - "os_family"
-  # from subset "service_mgr" (the role manages systemd timers/sockets and
-  # gates several tasks on ansible_facts['service_mgr'])
-  - "service_mgr"
-  # from subset "selinux" (SELinux file context management is gated on
-  # ansible_facts['selinux']['status'])
-  - "selinux"
+  distribution:
+    - "distribution"
+    - "distribution_major_version"
+    - "distribution_version"
+    - "os_family"
+  # The role manages systemd timers/sockets and gates several tasks on
+  # ansible_facts['service_mgr'].
+  service_mgr:
+    - "service_mgr"
+  # SELinux file context management is gated on
+  # ansible_facts['selinux']['status'].
+  selinux:
+    - "selinux"
 
 
 # List of platforms this role supports and was designed for.
