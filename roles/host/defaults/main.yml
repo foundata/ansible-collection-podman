@@ -303,6 +303,75 @@ host_podman_docker_compat: false
 # - Required: No
 # - Default: []
 # - List elements: dict
+# - Dict attributes:
+#   - name:
+#     Name of the user account to enable for rootless Podman usage. The account
+#     must already exist.
+#     - Type: str
+#     - Required: Yes
+#   - state:
+#     `present` ensures the rootless enablement for this account, `absent`
+#     reverts it (disables lingering and the per-user timer, removes the
+#     per-user configuration managed by this role; subordinate ID ranges and the
+#     account itself are kept).
+#     - Type: str
+#     - Required: No
+#     - Default: present
+#     - Choices: present, absent
+#   - linger:
+#     Whether to enable systemd lingering (`loginctl enable-linger`) for the
+#     account. Lingering starts the user's systemd instance at boot and keeps it
+#     running without an interactive session; it is required for rootless
+#     containers that should start at boot and survive logout. Only disable this
+#     if you know what you are doing (e.g. containers are only run
+#     interactively).
+#     - Type: bool
+#     - Required: No
+#     - Default: true
+#   - subuid:
+#     Subordinate UID range for the account in `start:count` format (e.g.
+#     `100000:65536`, see `man subuid`). If unset (the default), the role
+#     ensures a range exists and automatically allocates a free one if missing.
+#     - Type: str
+#     - Required: No
+#   - subgid:
+#     Subordinate GID range for the account in `start:count` format (e.g.
+#     `100000:65536`, see `man subgid`). If unset (the default), the role
+#     ensures a range exists and automatically allocates a free one if missing.
+#     - Type: str
+#     - Required: No
+#   - auto_update:
+#     Whether to manage the account's `podman-auto-update.timer` (user scope)
+#     which periodically updates this user's containers labeled with
+#     `AutoUpdate=`. If `true`, the timer state follows
+#     `host_podman_service_state`. If `false`, the role ensures the per-user
+#     timer is disabled and stopped.
+#     - Type: bool
+#     - Required: No
+#     - Default: true
+#   - containers:
+#     Additional per-user Podman container engine settings, written to
+#     `~/.config/containers/containers.conf`. Same structure as
+#     `host_podman_containers`. Per-user settings take precedence over the
+#     system-wide configuration.
+#     - Type: dict
+#     - Required: No
+#     - Default: {}
+#   - storage: Additional per-user Podman storage settings, written to
+#     `~/.config/containers/storage.conf`. Same structure as
+#     `host_podman_storage`. Per-user settings take precedence over the
+#     system-wide configuration.
+#     - Type: dict
+#     - Required: No
+#     - Default: {}
+#   - registries:
+#     Additional per-user container image registry settings, written to
+#     `~/.config/containers/registries.conf`. Same structure as
+#     `host_podman_registries`. Per-user settings take precedence over the
+#     system-wide configuration.
+#     - Type: dict
+#     - Required: No
+#     - Default: {}
 host_podman_rootless_users: []
 
 
