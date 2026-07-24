@@ -147,6 +147,31 @@ quadlet_podman_user: ""
 # - Required: No
 # - Default: []
 # - List elements: dict
+# - Dict attributes:
+#   - name: Name of the Quadlet unit (the filename without extension, e.g.
+#     `zammad-psql` results in `zammad-psql.container`). Also the basis of the
+#     generated systemd service name. Must be unique within
+#     `quadlet_podman_units`. Allowed characters: letters, digits, `_`, `.` and
+#     `-`.
+#     - Type: str
+#     - Required: Yes
+#   - type:
+#     Type of the Quadlet unit, determining the file extension and the expected
+#     type-specific section (e.g. `container` expects a `Container` section).
+#
+#     Note: `artifact` requires Podman 5.7 or later (see
+#     `quadlet_podman_min_podman_version`).
+#     - Type: str
+#     - Required: Yes
+#     - Choices: container, pod, volume, network, kube, image, build, artifact
+#   - sections:
+#     Content of the Quadlet unit as a dictionary of sections. Keys are section
+#     names (e.g. `Unit`, `Container`, `Pod`, `Volume`, `Network`, `Service`,
+#     `Install`), values are dictionaries of the settings within that section.
+#     See the description of `quadlet_podman_units` for the rendering rules and
+#     an example.
+#     - Type: dict
+#     - Required: Yes
 quadlet_podman_units: []
 
 
@@ -171,6 +196,45 @@ quadlet_podman_units: []
 # - Type: dict
 # - Required: No
 # - Default: {}
+# - Dict attributes:
+#   - container:
+#     Default sections for all units of type `container`. Same structure as the
+#     per-unit `sections`.
+#     - Type: dict
+#     - Required: No
+#   - pod: Default sections for all units of type `pod`. Same structure as the
+#     per-unit `sections`.
+#     - Type: dict
+#     - Required: No
+#   - volume:
+#     Default sections for all units of type `volume`. Same structure as the
+#     per-unit `sections`.
+#     - Type: dict
+#     - Required: No
+#   - network:
+#     Default sections for all units of type `network`. Same structure as the
+#     per-unit `sections`.
+#     - Type: dict
+#     - Required: No
+#   - kube: Default sections for all units of type `kube`. Same structure as the
+#     per-unit `sections`.
+#     - Type: dict
+#     - Required: No
+#   - image:
+#     Default sections for all units of type `image`. Same structure as the
+#     per-unit `sections`.
+#     - Type: dict
+#     - Required: No
+#   - build:
+#     Default sections for all units of type `build`. Same structure as the
+#     per-unit `sections`.
+#     - Type: dict
+#     - Required: No
+#   - artifact:
+#     Default sections for all units of type `artifact`. Same structure as the
+#     per-unit `sections`.
+#     - Type: dict
+#     - Required: No
 quadlet_podman_unit_defaults: {}
 
 
@@ -202,6 +266,32 @@ quadlet_podman_unit_defaults: {}
 # - Required: No
 # - Default: []
 # - List elements: dict
+# - Dict attributes:
+#   - name:
+#     Name of the Podman secret. Allowed characters: letters, digits, `_`, `.`
+#     and `-`.
+#     - Type: str
+#     - Required: Yes
+#   - value:
+#     Value of the secret. Required when `state` is `present`. Trailing newlines
+#     are stripped (a common source of subtle authentication failures when
+#     values come from files or lookups).
+#     - Type: str
+#     - Required: No
+#   - state:
+#     `present` ensures the secret exists (without updating an existing one
+#     unless `force` is `true`), `absent` removes it.
+#     - Type: str
+#     - Required: No
+#     - Default: present
+#     - Choices: present, absent
+#   - force:
+#     If set to `true`, the secret is recreated on every run, updating its value
+#     (use for rotation). If `false` (the default), an existing secret is left
+#     untouched.
+#     - Type: bool
+#     - Required: No
+#     - Default: false
 quadlet_podman_secrets: []
 
 
@@ -224,6 +314,17 @@ quadlet_podman_secrets: []
 # - Required: No
 # - Default: []
 # - List elements: dict
+# - Dict attributes:
+#   - registry:
+#     Registry host to authenticate against (e.g. `registry.example.com`).
+#     - Type: str
+#     - Required: Yes
+#   - username: Username for the registry login.
+#     - Type: str
+#     - Required: Yes
+#   - password: Password or token for the registry login.
+#     - Type: str
+#     - Required: Yes
 quadlet_podman_registry_auth: []
 
 
@@ -251,6 +352,32 @@ quadlet_podman_registry_auth: []
 # - Required: No
 # - Default: []
 # - List elements: dict
+# - Dict attributes:
+#   - path: Absolute path of the directory.
+#     - Type: str
+#     - Required: Yes
+#   - owner:
+#     Owner of the directory. Defaults to `root` for rootful applications and to
+#     `quadlet_podman_user` for rootless ones.
+#     - Type: str
+#     - Required: No
+#   - group:
+#     Group of the directory. Defaults to the primary group of the directory's
+#     owner.
+#     - Type: str
+#     - Required: No
+#   - mode:
+#     Permissions of the directory, in symbolic or octal notation. Defaults to
+#     `u=rwx,g=rx,o=` (`0750`).
+#     - Type: str
+#     - Required: No
+#   - state:
+#     `present` ensures the directory exists, `absent` removes it including its
+#     content. Handle with care.
+#     - Type: str
+#     - Required: No
+#     - Default: present
+#     - Choices: present, absent
 quadlet_podman_directories: []
 
 
@@ -278,6 +405,33 @@ quadlet_podman_directories: []
 # - Required: No
 # - Default: []
 # - List elements: dict
+# - Dict attributes:
+#   - dest: Absolute path of the file.
+#     - Type: str
+#     - Required: Yes
+#   - content: Content of the file. Required when `state` is `present`.
+#     - Type: str
+#     - Required: No
+#   - owner:
+#     Owner of the file. Defaults to `root` for rootful applications and to
+#     `quadlet_podman_user` for rootless ones.
+#     - Type: str
+#     - Required: No
+#   - group:
+#     Group of the file. Defaults to the primary group of the file's owner.
+#     - Type: str
+#     - Required: No
+#   - mode: Permissions of the file, in symbolic or octal notation. Defaults to
+#     `u=rw,g=r,o=` (`0640`).
+#     - Type: str
+#     - Required: No
+#   - state:
+#     `present` ensures the file exists with the given content, `absent` removes
+#     it.
+#     - Type: str
+#     - Required: No
+#     - Default: present
+#     - Choices: present, absent
 quadlet_podman_files: []
 
 
