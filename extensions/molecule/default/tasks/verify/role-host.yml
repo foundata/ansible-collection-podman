@@ -54,6 +54,30 @@
   vars:
     __testing_host_timer_dropin_content: "{{ __testing_host_timer_dropin_slurp['content'] | ansible.builtin.b64decode }}"
 
+# All trigger directives share one list in systemd, so the drop-in must carry
+# exactly ONE empty reset line: a second one would wipe the triggers rendered
+# before it. The two configured OnCalendar values must therefore appear as two
+# assignments after that single reset.
+- name: "Molecule | Verify | host | Assert the timer drop-in carries exactly one trigger reset"
+  vars:
+    __testing_host_timer_dropin_content: >-
+      {{ __testing_host_timer_dropin_slurp['content'] | ansible.builtin.b64decode }}
+  ansible.builtin.assert:
+    that:
+      - >-
+        (__testing_host_timer_dropin_content | ansible.builtin.regex_findall('(?m)^OnCalendar=$')
+         | ansible.builtin.length) == 1
+      - >-
+        (__testing_host_timer_dropin_content | ansible.builtin.regex_findall('(?m)^OnCalendar=.+$')
+         | ansible.builtin.length) == 2
+    fail_msg: >-
+      The rendered timer drop-in must contain exactly one empty 'OnCalendar=' reset line
+      followed by the two configured expressions.
+      Actual content: {{ __testing_host_timer_dropin_content }}
+    success_msg: >-
+      The rendered timer drop-in carries exactly one trigger reset followed by both
+      configured OnCalendar expressions.
+
 
 - name: "Molecule | Verify | host | Get the effective calendar schedule of the image update timer"
   ansible.builtin.command:
@@ -73,9 +97,11 @@
       # OnCalendar is list-typed: without a reset line the drop-in schedule adds
       # to the vendor's (daily). Exactly one entry, at the configured time.
       - "'04:00:00' in __testing_host_timer_calendar['stdout']"
-      - "(__testing_host_timer_calendar['stdout'] | ansible.builtin.regex_findall('OnCalendar=') | ansible.builtin.length) == 1"
+      - "'05:00:00' in __testing_host_timer_calendar['stdout']"
+      # both configured expressions, and nothing from the vendor unit
+      - "(__testing_host_timer_calendar['stdout'] | ansible.builtin.regex_findall('OnCalendar=') | ansible.builtin.length) == 2"
       # the configured monotonic trigger must survive next to the calendar one
-      - "'OnActiveUSec=' in __testing_host_timer_calendar['stdout']"
+      - "'OnActiveUSec=1w' in __testing_host_timer_calendar['stdout']"
     fail_msg: >-
       podman-auto-update.timer has an unexpected effective schedule: the drop-in
       must replace the vendor OnCalendar, not add to it. Got
