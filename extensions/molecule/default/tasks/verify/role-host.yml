@@ -54,7 +54,8 @@
   vars:
     __testing_host_timer_dropin_content: "{{ __testing_host_timer_dropin_slurp['content'] | ansible.builtin.b64decode }}"
 
-# All trigger directives share one list in systemd, so the drop-in must carry
+# The repeatable time-trigger directives share one list in systemd, so the
+# drop-in must carry
 # exactly ONE empty reset line: a second one would wipe the triggers rendered
 # before it. The two configured OnCalendar values must therefore appear as two
 # assignments after that single reset.
@@ -86,6 +87,7 @@
       - "show"
       - "--property=TimersCalendar"
       - "--property=TimersMonotonic"
+      - "--property=OnClockChange"
       - "podman-auto-update.timer"
   register: __testing_host_timer_calendar
   changed_when: false
@@ -95,13 +97,15 @@
   ansible.builtin.assert:
     that:
       # OnCalendar is list-typed: without a reset line the drop-in schedule adds
-      # to the vendor's (daily). Exactly one entry, at the configured time.
+      # to the vendor's (daily). Exactly the configured entries, nothing more.
       - "'04:00:00' in __testing_host_timer_calendar['stdout']"
       - "'05:00:00' in __testing_host_timer_calendar['stdout']"
       # both configured expressions, and nothing from the vendor unit
       - "(__testing_host_timer_calendar['stdout'] | ansible.builtin.regex_findall('OnCalendar=') | ansible.builtin.length) == 2"
       # the configured monotonic trigger must survive next to the calendar one
       - "'OnActiveUSec=1w' in __testing_host_timer_calendar['stdout']"
+      # the boolean event trigger must be effective as well
+      - "'OnClockChange=yes' in __testing_host_timer_calendar['stdout']"
     fail_msg: >-
       podman-auto-update.timer has an unexpected effective schedule: the drop-in
       must replace the vendor OnCalendar, not add to it. Got
@@ -156,3 +160,349 @@
           - __testing_host_subid_result['rc'] == 0
           - (__testing_host_subid_result['stdout_lines'] | ansible.builtin.length) == 2
         quiet: true
+
+
+## Timer settings validation (init-only)
+#
+# The init tasks must reject timer settings the templates cannot render into a
+# valid unit, and an empty list must be the supported way to drop a built-in
+# trigger default. Each rejection case runs the role's init with one invalid
+# mapping and expects the run to fail inside the validation; the positive case
+# proves the empty-list removal is accepted and reaches the effective settings.
+
+- name: "Molecule | Verify | Run timer settings rejection checks (init-only)"
+  ansible.builtin.include_tasks:
+    file: "{{ (lookup('env', 'MOLECULE_SCENARIO_DIRECTORY') | ansible.builtin.default('../../default')) }}/tasks/verify/checks/timer-settings-reject.yml"
+  vars:
+    __testing_reject_case: "{{ item }}"
+  loop:
+    - label: "empty string trigger"
+      varname: "host_podman_auto_update_timer_settings"
+      settings:
+        OnCalendar: ""
+    - label: "invalid list member"
+      varname: "host_podman_auto_update_timer_settings"
+      settings:
+        OnCalendar:
+          - "daily"
+          - true
+    - label: "list for non-repeatable directive"
+      varname: "host_podman_auto_update_timer_settings"
+      settings:
+        RandomizedDelaySec:
+          - "30m"
+    - label: "mapping for non-repeatable directive"
+      varname: "host_podman_auto_update_timer_settings"
+      settings:
+        RandomizedDelaySec:
+          bad: "value"
+    - label: "no trigger left"
+      varname: "host_podman_auto_update_timer_settings"
+      settings:
+        OnCalendar: []
+    - label: "non-boolean event trigger"
+      varname: "host_podman_auto_update_timer_settings"
+      settings:
+        OnClockChange: "true"
+    - label: "event triggers false and no other trigger"
+      varname: "host_podman_auto_update_timer_settings"
+      settings:
+        OnCalendar: []
+        OnClockChange: false
+        OnTimezoneChange: false
+  loop_control:
+    label: "{{ item['label'] }}"
+
+
+- name: "Molecule | Verify | Timer settings: apply an empty-list removal with a monotonic trigger"
+  ansible.builtin.set_fact:
+    __testing_timer_settings_saved: "{{ host_podman_auto_update_timer_settings | ansible.builtin.default({}) }}"
+    host_podman_auto_update_timer_settings:
+      OnCalendar: []
+      OnBootSec: "10min"
+
+
+- name: "Molecule | Verify | Timer settings: include the role's init (must accept the removal)"
+  ansible.builtin.include_role:
+    name: "foundata.podman.host"
+    tasks_from: "init"
+    # Unlike the other verify files, this one never exposes the role's variables
+    # to the play, and the effective timer settings are computed lazily in the
+    # role's vars/main.yml. Export them so the assertion below can dereference
+    # the merged result.
+    public: true
+
+
+- name: "Molecule | Verify | Timer settings: assert the removal reached the effective settings"
+  ansible.builtin.assert:
+    that:
+      - (__host_podman_auto_update_timer_settings_effective['OnCalendar'] | ansible.builtin.length) == 0
+      - "__host_podman_auto_update_timer_settings_effective['OnBootSec'] == '10min'"
+    fail_msg: >-
+      The empty-list removal did not reach the effective timer settings.
+      Got: {{ __host_podman_auto_update_timer_settings_effective }}
+    success_msg: >-
+      An empty OnCalendar list drops the built-in default while the monotonic
+      trigger remains.
+
+
+- name: "Molecule | Verify | Timer settings: restore the saved settings"
+  ansible.builtin.set_fact:
+    host_podman_auto_update_timer_settings: "{{ __testing_timer_settings_saved }}"
+
+
+- name: "Molecule | Verify | Timer settings: apply an event-only configuration"
+  ansible.builtin.set_fact:
+    __testing_timer_settings_saved: "{{ host_podman_auto_update_timer_settings | ansible.builtin.default({}) }}"
+    host_podman_auto_update_timer_settings:
+      OnCalendar: []
+      OnClockChange: true
+
+
+- name: "Molecule | Verify | Timer settings: include the role's init (must accept the event-only timer)"
+  ansible.builtin.include_role:
+    name: "foundata.podman.host"
+    tasks_from: "init"
+    public: true
+
+
+- name: "Molecule | Verify | Timer settings: assert the event-only configuration reached the effective settings"
+  ansible.builtin.assert:
+    that:
+      - (__host_podman_auto_update_timer_settings_effective['OnCalendar'] | ansible.builtin.length) == 0
+      - __host_podman_auto_update_timer_settings_effective['OnClockChange'] | ansible.builtin.bool
+    fail_msg: >-
+      The event-only timer configuration did not reach the effective settings.
+      Got: {{ __host_podman_auto_update_timer_settings_effective }}
+    success_msg: >-
+      An event-only timer (all repeatable triggers dropped, OnClockChange true)
+      is accepted.
+
+
+- name: "Molecule | Verify | Timer settings: restore the saved settings again"
+  ansible.builtin.set_fact:
+    host_podman_auto_update_timer_settings: "{{ __testing_timer_settings_saved }}"
+
+
+## Timer settings: event-only timer applied to the system (integration)
+#
+# The init-only positive case above proves acceptance, but not the rendered
+# result. Re-run the role with an event-only configuration and ask systemd:
+# the drop-in must carry the single reset and nothing else next to the event
+# trigger, and the unit must end up with empty calendar/monotonic trigger
+# lists while OnClockChange is active. This is the path that would regress if
+# the reset detection stopped counting event triggers.
+
+- name: "Molecule | Verify | Timer settings | event-only integration: save the current settings"
+  ansible.builtin.set_fact:
+    __testing_timer_settings_saved: "{{ host_podman_auto_update_timer_settings | ansible.builtin.default({}) }}"
+    host_podman_auto_update_timer_settings:
+      OnCalendar: []
+      OnClockChange: true
+
+
+- name: "Molecule | Verify | Timer settings | event-only integration: apply the role"
+  ansible.builtin.include_role:
+    name: "foundata.podman.host"
+
+
+- name: "Molecule | Verify | Timer settings | event-only integration: run pending handlers (daemon-reload)"
+  ansible.builtin.meta: flush_handlers
+
+
+- name: "Molecule | Verify | Timer settings | event-only integration: read the rendered drop-in"
+  ansible.builtin.slurp:
+    src: "/etc/systemd/system/podman-auto-update.timer.d/00-managed.conf"
+  register: __testing_timer_eventonly_dropin
+
+
+- name: "Molecule | Verify | Timer settings | event-only integration: assert the rendered drop-in"
+  vars:
+    __testing_timer_eventonly_decoded: "{{ __testing_timer_eventonly_dropin['content'] | ansible.builtin.b64decode }}"
+  ansible.builtin.assert:
+    that:
+      # exactly the single shared reset, no calendar or monotonic assignment
+      - >-
+        (__testing_timer_eventonly_decoded
+         | ansible.builtin.regex_findall('(?m)^OnCalendar=$') | ansible.builtin.length) == 1
+      - >-
+        (__testing_timer_eventonly_decoded
+         | ansible.builtin.regex_findall('(?m)^On\w+=.+$')
+         | ansible.builtin.reject('match', '^OnClockChange=')
+         | ansible.builtin.list | ansible.builtin.length) == 0
+      - "'OnClockChange=true' in __testing_timer_eventonly_decoded"
+    fail_msg: >-
+      The event-only drop-in must contain exactly one empty 'OnCalendar=' reset and the
+      event trigger, nothing else. Actual content: {{ __testing_timer_eventonly_decoded }}
+    success_msg: "The event-only drop-in carries the single reset and the event trigger."
+
+
+- name: "Molecule | Verify | Timer settings | event-only integration: get the parsed unit properties"
+  ansible.builtin.command:
+    argv:
+      - "systemctl"
+      - "show"
+      - "--property=TimersCalendar"
+      - "--property=TimersMonotonic"
+      - "--property=OnClockChange"
+      - "podman-auto-update.timer"
+  register: __testing_timer_eventonly_props
+  changed_when:
+    - false
+
+
+- name: "Molecule | Verify | Timer settings | event-only integration: assert the effective unit state"
+  ansible.builtin.assert:
+    that:
+      # Both trigger lists must be empty: the reset removed the vendor schedule.
+      # "systemctl show" omits empty properties unless --all is given, so assert
+      # the absence of the non-empty form ("TimersCalendar={ ... }"), which is
+      # robust across systemd versions.
+      - "'TimersCalendar={' not in __testing_timer_eventonly_props['stdout']"
+      - "'TimersMonotonic={' not in __testing_timer_eventonly_props['stdout']"
+      - "'OnClockChange=yes' in __testing_timer_eventonly_props['stdout']"
+    fail_msg: >-
+      The event-only timer does not have the expected effective state (empty trigger
+      lists, active OnClockChange). Got: {{ __testing_timer_eventonly_props['stdout'] }}
+    success_msg: "The event-only timer is effective: empty trigger lists, OnClockChange active."
+
+
+- name: "Molecule | Verify | Timer settings | event-only integration: restore the saved settings"
+  ansible.builtin.set_fact:
+    host_podman_auto_update_timer_settings: "{{ __testing_timer_settings_saved }}"
+
+
+- name: "Molecule | Verify | Timer settings | event-only integration: re-apply the role with the restored settings"
+  ansible.builtin.include_role:
+    name: "foundata.podman.host"
+
+
+- name: "Molecule | Verify | Timer settings | event-only integration: run pending handlers again"
+  ansible.builtin.meta: flush_handlers
+
+
+## Timer settings: triggerless settings accepted while the timer is unmanaged
+#
+# The "keeps at least one trigger" check mirrors the conditions under which the
+# config tasks manage the timer. Prove the mirroring: with host_podman_auto_update set to false
+# the same triggerless settings that are rejected above must pass init.
+
+- name: "Molecule | Verify | Timer settings | unmanaged: save the current settings and flags"
+  ansible.builtin.set_fact:
+    __testing_timer_settings_saved: "{{ host_podman_auto_update_timer_settings | ansible.builtin.default({}) }}"
+    __testing_timer_autoupdate_saved: "{{ host_podman_auto_update | ansible.builtin.default(true) }}"
+    host_podman_auto_update_timer_settings:
+      OnCalendar: []
+    host_podman_auto_update: false
+
+
+- name: "Molecule | Verify | Timer settings | unmanaged: include the role's init (must accept triggerless settings)"
+  ansible.builtin.include_role:
+    name: "foundata.podman.host"
+    tasks_from: "init"
+    # This verify file never exposes the role's variables to the play; export
+    # them so the lazily computed effective settings can be asserted below.
+    public: true
+
+
+- name: "Molecule | Verify | Timer settings | unmanaged: assert the triggerless settings were in effect"
+  ansible.builtin.assert:
+    that:
+      - (__host_podman_auto_update_timer_settings_effective['OnCalendar'] | ansible.builtin.length) == 0
+    fail_msg: >-
+      The triggerless settings were not in effect during the init run, the acceptance
+      is vacuous. Got: {{ __host_podman_auto_update_timer_settings_effective }}
+    success_msg: >-
+      Triggerless settings pass init while the timer is not managed, so the trigger
+      check mirrors the management conditions.
+
+
+- name: "Molecule | Verify | Timer settings | unmanaged: restore the saved settings and flags"
+  ansible.builtin.set_fact:
+    host_podman_auto_update_timer_settings: "{{ __testing_timer_settings_saved }}"
+    host_podman_auto_update: "{{ __testing_timer_autoupdate_saved }}"
+
+
+## Timer settings: triggerless settings accepted while the service state is unmanaged
+#
+# The case above disables host_podman_auto_update, a condition the trigger
+# check carried from the start. The service-state condition is one of the newly
+# mirrored ones, so it needs its own case: with automatic updates still
+# enabled, host_podman_service_state set to unmanaged alone must make the
+# triggerless settings pass.
+
+- name: "Molecule | Verify | Timer settings | service state unmanaged: save the settings and flags"
+  ansible.builtin.set_fact:
+    __testing_timer_settings_saved: "{{ host_podman_auto_update_timer_settings | ansible.builtin.default({}) }}"
+    __testing_timer_service_state_saved: "{{ host_podman_service_state | ansible.builtin.default('enabled') }}"
+    host_podman_auto_update_timer_settings:
+      OnCalendar: []
+    host_podman_service_state: "unmanaged"
+
+
+- name: "Molecule | Verify | Timer settings | service state unmanaged: include the role's init (must accept triggerless settings)"
+  ansible.builtin.include_role:
+    name: "foundata.podman.host"
+    tasks_from: "init"
+    # Export the role's variables so the lazily computed effective settings can
+    # be asserted below (this verify file never exposes them otherwise).
+    public: true
+
+
+- name: "Molecule | Verify | Timer settings | service state unmanaged: assert the triggerless settings were in effect"
+  ansible.builtin.assert:
+    that:
+      - (__host_podman_auto_update_timer_settings_effective['OnCalendar'] | ansible.builtin.length) == 0
+    fail_msg: >-
+      The triggerless settings were not in effect during the init run, the acceptance
+      is vacuous. Got: {{ __host_podman_auto_update_timer_settings_effective }}
+    success_msg: >-
+      Triggerless settings pass init while the service state is unmanaged, so the
+      trigger check mirrors the management conditions.
+
+
+- name: "Molecule | Verify | Timer settings | service state unmanaged: restore the saved settings and flags"
+  ansible.builtin.set_fact:
+    host_podman_auto_update_timer_settings: "{{ __testing_timer_settings_saved }}"
+    host_podman_service_state: "{{ __testing_timer_service_state_saved }}"
+
+
+## Timer settings: triggerless settings accepted on a non-systemd service manager
+#
+# The service-manager condition is the remaining newly mirrored one. Passing
+# ansible_facts as an include variable shadows the magic mapping for that
+# include only, so the real gathered facts stay untouched and nothing needs
+# restoring.
+
+- name: "Molecule | Verify | Timer settings | non-systemd: save the settings and build the fact override"
+  ansible.builtin.set_fact:
+    __testing_timer_settings_saved: "{{ host_podman_auto_update_timer_settings | ansible.builtin.default({}) }}"
+    __testing_facts_override: "{{ ansible_facts | ansible.builtin.combine({'service_mgr': 'openrc'}) }}"
+    host_podman_auto_update_timer_settings:
+      OnCalendar: []
+
+
+- name: "Molecule | Verify | Timer settings | non-systemd: include the role's init (must accept triggerless settings)"
+  ansible.builtin.include_role:
+    name: "foundata.podman.host"
+    tasks_from: "init"
+    public: true
+  vars:
+    ansible_facts: "{{ __testing_facts_override }}"
+
+
+- name: "Molecule | Verify | Timer settings | non-systemd: assert the triggerless settings were in effect"
+  ansible.builtin.assert:
+    that:
+      - (__host_podman_auto_update_timer_settings_effective['OnCalendar'] | ansible.builtin.length) == 0
+    fail_msg: >-
+      The triggerless settings were not in effect during the init run, the acceptance
+      is vacuous. Got: {{ __host_podman_auto_update_timer_settings_effective }}
+    success_msg: >-
+      Triggerless settings pass init on a non-systemd service manager, so the trigger
+      check mirrors the management conditions.
+
+
+- name: "Molecule | Verify | Timer settings | non-systemd: restore the saved settings"
+  ansible.builtin.set_fact:
+    host_podman_auto_update_timer_settings: "{{ __testing_timer_settings_saved }}"
