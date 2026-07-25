@@ -26,6 +26,10 @@
       # Distinct from the vendor podman-auto-update.timer schedule (daily) so the
       # verify can prove the drop-in replaces it rather than accumulating.
       OnCalendar: "*-*-* 04:00:00"
+      # A second trigger of a different kind: all trigger directives share one
+      # list in systemd, so this guards against a reset that wipes the calendar
+      # trigger rendered before it.
+      OnActiveSec: "7d"
       RandomizedDelaySec: "30m"
     host_podman_selinux_label_paths:
       - "/var/lib/podman"
