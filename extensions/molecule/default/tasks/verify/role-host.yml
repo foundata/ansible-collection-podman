@@ -16,7 +16,7 @@
       - >-
         (__testing_host_podman_version_result['stdout']
          | ansible.builtin.regex_search('[0-9]+\.[0-9]+(\.[0-9]+)?'))
-        is version_compare('5.0.0', '>=')
+        is ansible.builtin.version('5.0.0', '>=')
     quiet: true
 
 
