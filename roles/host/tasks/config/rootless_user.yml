@@ -28,7 +28,7 @@
 - name: "Config | Rootless | Check the existence of the account '{{ __host_podman_ru['name'] }}'"
   ansible.builtin.assert:
     that:
-      - ansible_facts['getent_passwd'][__host_podman_ru['name']] is not none
+      - ansible_facts['getent_passwd'][__host_podman_ru['name']] is not ansible.builtin.none
     fail_msg: >-
       The account '{{ __host_podman_ru['name'] }}' from host_podman_rootless_users
       does not exist. This role does not create accounts; create it beforehand
@@ -69,7 +69,7 @@
       vars:
         __host_podman_ru_home: "{{ ansible_facts['getent_passwd'][__host_podman_ru['name']][4] }}"
       when:
-        - ansible_facts['getent_passwd'][__host_podman_ru['name']] is not none
+        - ansible_facts['getent_passwd'][__host_podman_ru['name']] is not ansible.builtin.none
       loop:
         - "containers.conf"
         - "storage.conf"
@@ -136,7 +136,7 @@
           {%-   if (__parts | ansible.builtin.length) == 3
                    and (__parts[1] is ansible.builtin.match('^[0-9]+$'))
                    and (__parts[2] is ansible.builtin.match('^[0-9]+$')) -%}
-          {%-     set __end = (__parts[1] | int) + (__parts[2] | int) -%}
+          {%-     set __end = (__parts[1] | ansible.builtin.int) + (__parts[2] | ansible.builtin.int) -%}
           {%-     if __end > __ns.maxend -%}
           {%-       set __ns.maxend = __end -%}
           {%-     endif -%}

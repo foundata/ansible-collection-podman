@@ -76,9 +76,9 @@
       loop: >-
         {{
           (__quadlet_podman_owned_result['stdout_lines'] | ansible.builtin.default([])
-           | ansible.builtin.reject('search', '\.pod$') | ansible.builtin.list)
+           | ansible.builtin.reject('ansible.builtin.search', '\.pod$') | ansible.builtin.list)
           + (__quadlet_podman_owned_result['stdout_lines'] | ansible.builtin.default([])
-             | ansible.builtin.select('search', '\.pod$') | ansible.builtin.list)
+             | ansible.builtin.select('ansible.builtin.search', '\.pod$') | ansible.builtin.list)
         }}
       loop_control:
         loop_var: "__quadlet_podman_owned_path"

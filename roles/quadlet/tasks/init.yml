@@ -53,10 +53,10 @@
     __quadlet_podman_matched_versions: >-
       {{
         __quadlet_podman_supported_platforms
-        | ansible.builtin.selectattr('name', 'match', __quadlet_podman_platform_names_regex, ignorecase=true)
+        | ansible.builtin.selectattr('name', 'ansible.builtin.match', __quadlet_podman_platform_names_regex, ignorecase=true)
         | ansible.builtin.map(attribute='versions')
         | ansible.builtin.flatten
-        | ansible.builtin.select('match', __quadlet_podman_platform_versions_regex, ignorecase=true)
+        | ansible.builtin.select('ansible.builtin.match', __quadlet_podman_platform_versions_regex, ignorecase=true)
         | ansible.builtin.list
       }}
   when:
@@ -143,7 +143,7 @@
       - >-
         quadlet_podman_units
         | ansible.builtin.map(attribute='name')
-        | ansible.builtin.reject('match', '^[A-Za-z0-9_.-]+$')
+        | ansible.builtin.reject('ansible.builtin.match', '^[A-Za-z0-9_.-]+$')
         | ansible.builtin.length == 0
       # slirp4netns was removed in Podman 6; pasta is the rootless default
       - quadlet_podman_units | ansible.builtin.string is not ansible.builtin.search('slirp4netns')
@@ -192,7 +192,7 @@
         (__quadlet_podman_unit_item['sections']['Container']['Pod'] | ansible.builtin.regex_replace('\.pod$', ''))
         in (
           __quadlet_podman_units_effective
-          | ansible.builtin.selectattr('type', 'eq', 'pod')
+          | ansible.builtin.selectattr('type', 'ansible.builtin.eq', 'pod')
           | ansible.builtin.map(attribute='name')
           | ansible.builtin.list
         )
@@ -342,7 +342,7 @@
             (quadlet_podman_min_podman_version is not ansible.builtin.defined)
             or (__quadlet_podman_version is ansible.builtin.version(quadlet_podman_min_podman_version, '>='))
           - >-
-            ((__quadlet_podman_units_effective | ansible.builtin.selectattr('type', 'eq', 'artifact') | ansible.builtin.length) == 0)
+            ((__quadlet_podman_units_effective | ansible.builtin.selectattr('type', 'ansible.builtin.eq', 'artifact') | ansible.builtin.length) == 0)
             or (__quadlet_podman_version is ansible.builtin.version(__quadlet_podman_artifact_min_podman_version, '>='))
         fail_msg: >-
           Podman {{ __quadlet_podman_version }} is too old for this application:
