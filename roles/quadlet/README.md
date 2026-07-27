@@ -555,6 +555,12 @@ Reference the secrets from Quadlet units via the `Secret` setting of
 the `Container` section, e.g.
 `Secret: "zammad_db_password,type=env,target=POSTGRES_PASSWORD"`.
 
+The role records the names of the secrets it created in a
+per-application manifest next to the unit files: secrets renamed or
+removed from this list get removed again on the next run, and
+`quadlet_podman_state: "absent"` removes all of the application's
+secrets even when the current list is empty or different.
+
 Example (reference a vaulted variable instead of a literal value in
 real deployments; note that Jinja expressions cannot be shown in this
 description as Ansible templates it during argument validation):
@@ -590,6 +596,7 @@ failures when values come from files or lookups).
 
 - **Type**: `str`
 - **Required**: No
+- **Sensitive**: Yes (`no_log`, values are masked in logs)
 
 #### `quadlet_podman_secrets['state']`<a id="variable-quadlet_podman_secrets-sub-state"></a>
 
@@ -625,6 +632,16 @@ List of container registries to log into before images are pulled,
 in the scope selected by `quadlet_podman_user`. Needed for images
 from private registries; the credentials are also used by the
 automatic image updates (`AutoUpdate=registry`).
+
+The role records its logins in a per-application manifest next to
+the unit files: registries removed from this list are logged out
+again on the next run, and `quadlet_podman_state: "absent"` logs out
+of all recorded registries, so no credentials linger after removal.
+Note that the authentication file is shared per scope (one per
+rootless account, `/etc/containers/auth.json` for rootful): logging
+out removes that registry's credentials for every application using
+the file; another application that still needs them logs in again on
+its next run.
 
 Example (reference a vaulted variable instead of a literal value in
 real deployments):
@@ -668,6 +685,7 @@ Password or token for the registry login.
 
 - **Type**: `str`
 - **Required**: Yes
+- **Sensitive**: Yes (`no_log`, values are masked in logs)
 
 
 
@@ -768,6 +786,12 @@ be avoided; prefer `quadlet_podman_secrets`.
 Changed files trigger a restart of the application's services (a
 container only picks up a changed environment file when it is
 restarted).
+
+The role records the paths of the files it created in a
+per-application manifest next to the unit files: files renamed or
+removed from this list get removed again on the next run, and
+`quadlet_podman_state: "absent"` removes all of the application's
+managed files even when the current list is empty or different.
 
 Example:
 

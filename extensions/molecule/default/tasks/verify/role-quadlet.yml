@@ -134,3 +134,396 @@
     quiet: true
   when:
     - inventory_hostname not in __testing_quadlet_rootless_start_excluded
+
+
+## Application manifest and cleanup reconciliation (rootful "webtest")
+#
+# The role records secrets, managed files and registry logins in a
+# per-application manifest so renamed or de-listed resources get cleaned up
+# and "absent" removes the application completely. The blocks below verify the
+# manifest content after converge, the reap of de-listed resources, the
+# registry logout reconciliation (offline, via a crafted authfile entry) and
+# finally the complete removal with empty declared lists. The removal test
+# runs last on purpose and leaves the webtest application uninstalled.
+
+- name: "Molecule | Verify | quadlet | Read the webtest application manifest"
+  ansible.builtin.slurp:
+    src: "/etc/containers/systemd/.webtest.ansible-manifest"
+  register: __testing_quadlet_manifest_slurp
+
+
+- name: "Molecule | Verify | quadlet | Check the manifest records the converge resources"
+  ansible.builtin.assert:
+    that:
+      - "'Managed by Ansible (foundata.podman.quadlet): app=webtest' in __testing_quadlet_manifest_content"
+      - __testing_quadlet_manifest_parsed['secrets'] == ['webtest_secret']
+      - __testing_quadlet_manifest_parsed['files'] == ['/var/lib/webtest/app.env']
+      - (__testing_quadlet_manifest_parsed['registries'] | ansible.builtin.length) == 0
+    fail_msg: >-
+      The webtest manifest does not record the converge resources.
+      Content: {{ __testing_quadlet_manifest_content }}
+    success_msg: "The webtest manifest records the converge resources."
+  vars:
+    __testing_quadlet_manifest_content: "{{ __testing_quadlet_manifest_slurp['content'] | ansible.builtin.b64decode }}"
+    __testing_quadlet_manifest_parsed: "{{ __testing_quadlet_manifest_content | ansible.builtin.from_yaml }}"
+
+
+- name: "Molecule | Verify | quadlet | Reap: re-run the role with an additional secret and file"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "webtest"
+    quadlet_podman_state: "present"
+    quadlet_podman_service_state: "enabled"
+    quadlet_podman_directories:
+      - path: "/var/lib/webtest"
+    quadlet_podman_files:
+      - dest: "/var/lib/webtest/app.env"
+        content: |
+          WEBTEST_GREETING=hello
+      - dest: "/var/lib/webtest/temp.env"
+        content: |
+          WEBTEST_TEMP=value
+    quadlet_podman_secrets:
+      - name: "webtest_secret"
+        value: "molecule-test-value"
+      - name: "webtest_tempsecret"
+        value: "molecule-temp-value"
+    quadlet_podman_unit_defaults:
+      container:
+        Service:
+          Restart: "on-failure"
+    quadlet_podman_units:
+      - name: "webtest-data"
+        type: "volume"
+        sections:
+          Volume:
+            VolumeName: "webtest-data"
+      - name: "webtest"
+        type: "container"
+        sections:
+          Unit:
+            Description: "Molecule webtest container"
+            After:
+              - "webtest-data"
+          Container:
+            ContainerName: "webtest"
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "top"
+            Volume:
+              - "webtest-data.volume:/data"
+            EnvironmentFile:
+              - "/var/lib/webtest/app.env"
+            Secret:
+              - "webtest_secret,type=env,target=WEBTEST_SECRET"
+          Install:
+            WantedBy:
+              - "multi-user.target"
+
+
+- name: "Molecule | Verify | quadlet | Reap: query the Podman secrets after adding"
+  ansible.builtin.command:
+    argv:
+      - "/usr/bin/podman"
+      - "secret"
+      - "ls"
+      - "--format"
+      - "{{ '{{.Name}}' }}"
+  register: __testing_quadlet_reap_added_secrets
+  changed_when: false
+
+
+- name: "Molecule | Verify | quadlet | Reap: read the manifest after adding"
+  ansible.builtin.slurp:
+    src: "/etc/containers/systemd/.webtest.ansible-manifest"
+  register: __testing_quadlet_reap_added_manifest
+
+
+- name: "Molecule | Verify | quadlet | Reap: check the additional resources exist and are recorded"
+  ansible.builtin.assert:
+    that:
+      - "'webtest_tempsecret' in __testing_quadlet_reap_added_secrets['stdout_lines']"
+      - "'webtest_tempsecret' in __testing_quadlet_reap_manifest_parsed['secrets']"
+      - "'/var/lib/webtest/temp.env' in __testing_quadlet_reap_manifest_parsed['files']"
+    fail_msg: >-
+      The additional secret/file did not get created or recorded in the
+      manifest.
+    success_msg: "The additional secret and file exist and are recorded."
+  vars:
+    __testing_quadlet_reap_manifest_parsed: >-
+      {{ __testing_quadlet_reap_added_manifest['content'] | ansible.builtin.b64decode | ansible.builtin.from_yaml }}
+
+
+# Same input as converge again: the previously added secret and file are now
+# de-listed (the rename scenario) and must be removed by the reconciliation.
+- name: "Molecule | Verify | quadlet | Reap: re-run the role without the additional resources"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "webtest"
+    quadlet_podman_state: "present"
+    quadlet_podman_service_state: "enabled"
+    quadlet_podman_directories:
+      - path: "/var/lib/webtest"
+    quadlet_podman_files:
+      - dest: "/var/lib/webtest/app.env"
+        content: |
+          WEBTEST_GREETING=hello
+    quadlet_podman_secrets:
+      - name: "webtest_secret"
+        value: "molecule-test-value"
+    quadlet_podman_unit_defaults:
+      container:
+        Service:
+          Restart: "on-failure"
+    quadlet_podman_units:
+      - name: "webtest-data"
+        type: "volume"
+        sections:
+          Volume:
+            VolumeName: "webtest-data"
+      - name: "webtest"
+        type: "container"
+        sections:
+          Unit:
+            Description: "Molecule webtest container"
+            After:
+              - "webtest-data"
+          Container:
+            ContainerName: "webtest"
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "top"
+            Volume:
+              - "webtest-data.volume:/data"
+            EnvironmentFile:
+              - "/var/lib/webtest/app.env"
+            Secret:
+              - "webtest_secret,type=env,target=WEBTEST_SECRET"
+          Install:
+            WantedBy:
+              - "multi-user.target"
+
+
+- name: "Molecule | Verify | quadlet | Reap: query the Podman secrets after de-listing"
+  ansible.builtin.command:
+    argv:
+      - "/usr/bin/podman"
+      - "secret"
+      - "ls"
+      - "--format"
+      - "{{ '{{.Name}}' }}"
+  register: __testing_quadlet_reap_removed_secrets
+  changed_when: false
+
+
+- name: "Molecule | Verify | quadlet | Reap: check the temp file is gone"
+  ansible.builtin.stat:
+    path: "/var/lib/webtest/temp.env"
+  register: __testing_quadlet_reap_tempfile_stat
+
+
+- name: "Molecule | Verify | quadlet | Reap: read the manifest after de-listing"
+  ansible.builtin.slurp:
+    src: "/etc/containers/systemd/.webtest.ansible-manifest"
+  register: __testing_quadlet_reap_removed_manifest
+
+
+- name: "Molecule | Verify | quadlet | Reap: check the de-listed resources were removed"
+  ansible.builtin.assert:
+    that:
+      - "'webtest_tempsecret' not in __testing_quadlet_reap_removed_secrets['stdout_lines']"
+      - "'webtest_secret' in __testing_quadlet_reap_removed_secrets['stdout_lines']"
+      - not __testing_quadlet_reap_tempfile_stat['stat']['exists']
+      - __testing_quadlet_reap_manifest_parsed['secrets'] == ['webtest_secret']
+      - __testing_quadlet_reap_manifest_parsed['files'] == ['/var/lib/webtest/app.env']
+    fail_msg: >-
+      De-listed resources survived the reconciliation (renamed secrets/files
+      would linger forever).
+    success_msg: "De-listed secret and file were removed, declared ones survived."
+  vars:
+    __testing_quadlet_reap_manifest_parsed: >-
+      {{ __testing_quadlet_reap_removed_manifest['content'] | ansible.builtin.b64decode | ansible.builtin.from_yaml }}
+
+
+## Registry logout reconciliation (offline)
+#
+# podman logout only edits the authentication file, so the reconciliation can
+# be verified without a reachable registry: craft an authfile entry, record
+# the registry in the manifest, run the role without quadlet_podman_registry_auth
+# and expect the entry to be logged out again.
+
+- name: "Molecule | Verify | quadlet | Logout: craft an authfile entry"
+  ansible.builtin.copy:
+    content: |
+      {"auths": {"registry.molecule.invalid": {"auth": "dGVzdDp0ZXN0"}}}
+    dest: "/etc/containers/auth.json"
+    owner: "root"
+    group: "root"
+    mode: "u=rw,g=,o="
+
+
+- name: "Molecule | Verify | quadlet | Logout: record the registry in the manifest"
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible (foundata.podman.quadlet): app=webtest
+      files:
+        - /var/lib/webtest/app.env
+      registries:
+        - registry.molecule.invalid
+      secrets:
+        - webtest_secret
+    dest: "/etc/containers/systemd/.webtest.ansible-manifest"
+    owner: "root"
+    group: "root"
+    mode: "u=rw,g=r,o="
+
+
+- name: "Molecule | Verify | quadlet | Logout: re-run the role without registry logins"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "webtest"
+    quadlet_podman_state: "present"
+    quadlet_podman_service_state: "enabled"
+    quadlet_podman_directories:
+      - path: "/var/lib/webtest"
+    quadlet_podman_files:
+      - dest: "/var/lib/webtest/app.env"
+        content: |
+          WEBTEST_GREETING=hello
+    quadlet_podman_secrets:
+      - name: "webtest_secret"
+        value: "molecule-test-value"
+    quadlet_podman_unit_defaults:
+      container:
+        Service:
+          Restart: "on-failure"
+    quadlet_podman_units:
+      - name: "webtest-data"
+        type: "volume"
+        sections:
+          Volume:
+            VolumeName: "webtest-data"
+      - name: "webtest"
+        type: "container"
+        sections:
+          Unit:
+            Description: "Molecule webtest container"
+            After:
+              - "webtest-data"
+          Container:
+            ContainerName: "webtest"
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "top"
+            Volume:
+              - "webtest-data.volume:/data"
+            EnvironmentFile:
+              - "/var/lib/webtest/app.env"
+            Secret:
+              - "webtest_secret,type=env,target=WEBTEST_SECRET"
+          Install:
+            WantedBy:
+              - "multi-user.target"
+
+
+- name: "Molecule | Verify | quadlet | Logout: read the authfile"
+  ansible.builtin.slurp:
+    src: "/etc/containers/auth.json"
+  register: __testing_quadlet_logout_authfile
+  failed_when:
+    # tolerate podman removing the whole file with its last entry
+    - __testing_quadlet_logout_authfile['msg'] is ansible.builtin.defined
+    - "'file not found' not in (__testing_quadlet_logout_authfile['msg'] | ansible.builtin.lower)"
+
+
+- name: "Molecule | Verify | quadlet | Logout: read the manifest"
+  ansible.builtin.slurp:
+    src: "/etc/containers/systemd/.webtest.ansible-manifest"
+  register: __testing_quadlet_logout_manifest
+
+
+- name: "Molecule | Verify | quadlet | Logout: check the credentials were removed"
+  ansible.builtin.assert:
+    that:
+      - >-
+        'registry.molecule.invalid' not in
+        (__testing_quadlet_logout_authfile['content'] | ansible.builtin.default('') | ansible.builtin.b64decode)
+      - >-
+        ((__testing_quadlet_logout_manifest['content'] | ansible.builtin.b64decode
+          | ansible.builtin.from_yaml)['registries'] | ansible.builtin.default([])
+         | ansible.builtin.length) == 0
+    fail_msg: >-
+      The de-listed registry login survived the reconciliation (stale
+      credentials would linger in the authfile forever).
+    success_msg: "The de-listed registry was logged out and unrecorded."
+
+
+## Complete removal via the manifest (runs last on purpose)
+#
+# state "absent" with empty declared lists must remove everything the
+# application ever created: the manifest, not the current variable values,
+# is the source of truth. Data (host directories, named volumes) is
+# deliberately kept. The webtest application stays uninstalled after this.
+
+- name: "Molecule | Verify | quadlet | Absent: remove the webtest application with empty lists"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "webtest"
+    quadlet_podman_state: "absent"
+
+
+- name: "Molecule | Verify | quadlet | Absent: query the Podman secrets"
+  ansible.builtin.command:
+    argv:
+      - "/usr/bin/podman"
+      - "secret"
+      - "ls"
+      - "--format"
+      - "{{ '{{.Name}}' }}"
+  register: __testing_quadlet_absent_secrets
+  changed_when: false
+
+
+- name: "Molecule | Verify | quadlet | Absent: query the Podman volumes"
+  ansible.builtin.command:
+    argv:
+      - "/usr/bin/podman"
+      - "volume"
+      - "ls"
+      - "--format"
+      - "{{ '{{.Name}}' }}"
+  register: __testing_quadlet_absent_volumes
+  changed_when: false
+
+
+- name: "Molecule | Verify | quadlet | Absent: check the remaining artifacts"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: __testing_quadlet_absent_stat
+  loop:
+    - "/etc/containers/systemd/webtest.container"
+    - "/etc/containers/systemd/webtest-data.volume"
+    - "/etc/containers/systemd/.webtest.ansible-manifest"
+    - "/var/lib/webtest/app.env"
+    - "/var/lib/webtest"
+
+
+- name: "Molecule | Verify | quadlet | Absent: check the application is fully removed, data kept"
+  ansible.builtin.assert:
+    that:
+      # units, manifest and managed file gone despite empty declared lists
+      - not __testing_quadlet_absent_stat['results'][0]['stat']['exists']
+      - not __testing_quadlet_absent_stat['results'][1]['stat']['exists']
+      - not __testing_quadlet_absent_stat['results'][2]['stat']['exists']
+      - not __testing_quadlet_absent_stat['results'][3]['stat']['exists']
+      - "'webtest_secret' not in __testing_quadlet_absent_secrets['stdout_lines']"
+      # persistent data is deliberately kept
+      - __testing_quadlet_absent_stat['results'][4]['stat']['exists']
+      - "'webtest-data' in __testing_quadlet_absent_volumes['stdout_lines']"
+    fail_msg: >-
+      state "absent" with empty declared lists did not remove the manifest
+      recorded resources (or removed persistent data it must keep).
+    success_msg: >-
+      state "absent" removed all manifest-recorded resources and kept the
+      persistent data.

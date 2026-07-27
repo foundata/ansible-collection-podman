@@ -8,7 +8,31 @@
 #   3. secrets           -> referenced by the units at container creation
 #   4. registry logins   -> image pulls must be able to authenticate
 #   5. Quadlet units     -> written last, then a single daemon-reload (handler)
-#   6. cleanup           -> units removed from quadlet_podman_units get reaped
+#   6. cleanup           -> units removed from quadlet_podman_units get reaped,
+#                           and manifest-recorded secrets, files and registry
+#                           logins no longer declared get removed / logged out
+#   7. manifest          -> records the application's current resources for
+#                           the next run's cleanup and for state "absent"
+
+
+- name: "Config | Default | Read the application manifest (previously created resources)"
+  ansible.builtin.slurp:
+    src: "{{ __quadlet_podman_manifest_file_path }}"
+  register: __quadlet_podman_manifest_slurp
+  failed_when:
+    # tolerate a missing manifest (first run; treated as empty below)
+    - __quadlet_podman_manifest_slurp['msg'] is ansible.builtin.defined
+    - "'file not found' not in (__quadlet_podman_manifest_slurp['msg'] | ansible.builtin.lower)"
+
+
+- name: "Config | Default | Determine the previously created resources of the application"
+  ansible.builtin.set_fact:
+    __quadlet_podman_manifest_old: >-
+      {{
+        (__quadlet_podman_manifest_slurp['content'] | ansible.builtin.default('')
+         | ansible.builtin.b64decode | ansible.builtin.from_yaml)
+        | ansible.builtin.default({}, true)
+      }}
 
 
 - name: "Config | Default | Ensure the user configuration directory exists (rootless)"
@@ -256,3 +280,101 @@
     label: "{{ __quadlet_podman_stale_path }}"
   notify:
     - "quadlet_podman: systemd daemon-reload"
+
+
+### Cleanup: reap manifest-recorded resources that are no longer declared
+### (renamed or de-listed secrets, managed files and registry logins)
+
+# Only secret names are handled here, no secret values are involved.
+- name: "Config | Default | Remove Podman secrets no longer declared"
+  containers.podman.podman_secret:
+    name: "{{ __quadlet_podman_stale_secret }}"
+    state: "absent"
+    executable: "{{ __quadlet_podman_podman_exec_path }}"
+  become: true
+  become_user: "{{ __quadlet_podman_become_user }}"
+  environment: "{{ __quadlet_podman_task_environment }}"
+  loop: >-
+    {{
+      (__quadlet_podman_manifest_old['secrets'] | ansible.builtin.default([]))
+      | ansible.builtin.reject('ansible.builtin.in', __quadlet_podman_secret_names_declared)
+      | ansible.builtin.list
+    }}
+  loop_control:
+    loop_var: "__quadlet_podman_stale_secret"
+
+
+- name: "Config | Default | Remove managed files no longer declared"
+  ansible.builtin.file:
+    path: "{{ __quadlet_podman_stale_file }}"
+    state: "absent"
+  loop: >-
+    {{
+      (__quadlet_podman_manifest_old['files'] | ansible.builtin.default([]))
+      | ansible.builtin.reject('ansible.builtin.in', __quadlet_podman_file_dests_declared)
+      | ansible.builtin.list
+    }}
+  loop_control:
+    loop_var: "__quadlet_podman_stale_file"
+  notify:
+    - "quadlet_podman: restart application services"
+
+
+# Removes the registry's credentials from the (per-scope, shared) authfile;
+# another application still needing them re-creates the login on its next run.
+- name: "Config | Default | Log out of container registries no longer declared"
+  containers.podman.podman_logout:
+    registry: "{{ __quadlet_podman_stale_registry }}"
+    authfile: "{{ __quadlet_podman_authfile_path }}"
+    executable: "{{ __quadlet_podman_podman_exec_path }}"
+  become: true
+  become_user: "{{ __quadlet_podman_become_user }}"
+  environment: "{{ __quadlet_podman_task_environment }}"
+  register: __quadlet_podman_logout_result
+  failed_when:
+    # tolerate already-removed credentials or a hand-deleted authfile
+    - __quadlet_podman_logout_result is ansible.builtin.failed
+    - >-
+      (__quadlet_podman_logout_result['msg'] | ansible.builtin.default('') | ansible.builtin.lower)
+      is not ansible.builtin.search('not logged in|no such file')
+  loop: >-
+    {{
+      (__quadlet_podman_manifest_old['registries'] | ansible.builtin.default([]))
+      | ansible.builtin.reject('ansible.builtin.in', __quadlet_podman_registries_declared)
+      | ansible.builtin.list
+    }}
+  loop_control:
+    loop_var: "__quadlet_podman_stale_registry"
+
+
+### Manifest: record the application's current resources
+
+# Written last so it only records what the run above actually ensured.
+- name: "Config | Default | Record the application's resources in the manifest"
+  ansible.builtin.copy:
+    content: |
+      {{ __quadlet_podman_file_marker }}
+      {{ __quadlet_podman_manifest_data | ansible.builtin.to_nice_yaml(indent=2) }}
+    dest: "{{ __quadlet_podman_manifest_file_path }}"
+    owner: "{{ __quadlet_podman_file_owner }}"
+    group: "{{ __quadlet_podman_file_group }}"
+    mode: "{{ __quadlet_podman_managed_file_default_mode }}"
+  vars:
+    __quadlet_podman_manifest_data:
+      files: "{{ __quadlet_podman_file_dests_declared | ansible.builtin.sort }}"
+      registries: "{{ __quadlet_podman_registries_declared | ansible.builtin.sort }}"
+      secrets: "{{ __quadlet_podman_secret_names_declared | ansible.builtin.sort }}"
+  when: >-
+    ((__quadlet_podman_secret_names_declared | ansible.builtin.length) > 0)
+    or ((__quadlet_podman_file_dests_declared | ansible.builtin.length) > 0)
+    or ((__quadlet_podman_registries_declared | ansible.builtin.length) > 0)
+
+
+- name: "Config | Default | Remove the application manifest (no recorded resources)"
+  ansible.builtin.file:
+    path: "{{ __quadlet_podman_manifest_file_path }}"
+    state: "absent"
+  when:
+    - (__quadlet_podman_secret_names_declared | ansible.builtin.length) == 0
+    - (__quadlet_podman_file_dests_declared | ansible.builtin.length) == 0
+    - (__quadlet_podman_registries_declared | ansible.builtin.length) == 0

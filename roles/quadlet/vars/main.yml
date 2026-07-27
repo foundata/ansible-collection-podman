@@ -144,6 +144,42 @@ __quadlet_podman_managed_file_default_mode: "u=rw,g=r,o=" # 0640
 __quadlet_podman_file_marker: "# Managed by Ansible (foundata.podman.quadlet): app={{ quadlet_podman_app }}"
 
 
+# Per-application manifest recording the resources created outside the Quadlet
+# unit files: Podman secret names, managed file paths and registries logged
+# into. Unit files re-identify themselves via the embedded marker, but
+# secrets, arbitrary files and authfile entries cannot carry one, so this
+# manifest is the ownership record that lets renamed or de-listed resources be
+# cleaned up on the next run and lets state "absent" remove the application
+# completely even when the current lists differ from the deployed state.
+__quadlet_podman_manifest_file_path: "{{ __quadlet_podman_unit_dir_path }}/.{{ quadlet_podman_app }}.ansible-manifest"
+
+
+# Currently declared resources of the application (entries with state
+# "present" only); used by the cleanup reconciliation and the manifest.
+__quadlet_podman_secret_names_declared: >-
+  {%- set __names = [] -%}
+  {%- for __entry in quadlet_podman_secrets -%}
+  {%-   if (__entry['state'] | ansible.builtin.default('present')) == 'present' -%}
+  {%-     set _ = __names.append(__entry['name']) -%}
+  {%-   endif -%}
+  {%- endfor -%}
+  {{ __names }}
+__quadlet_podman_file_dests_declared: >-
+  {%- set __dests = [] -%}
+  {%- for __entry in quadlet_podman_files -%}
+  {%-   if (__entry['state'] | ansible.builtin.default('present')) == 'present' -%}
+  {%-     set _ = __dests.append(__entry['dest']) -%}
+  {%-   endif -%}
+  {%- endfor -%}
+  {{ __dests }}
+__quadlet_podman_registries_declared: >-
+  {{
+    quadlet_podman_registry_auth
+    | ansible.builtin.map(attribute='registry')
+    | ansible.builtin.list
+  }}
+
+
 # All Quadlet file extensions the systemd generator knows about; used to find
 # candidate files during cleanup.
 __quadlet_podman_unit_extensions:
