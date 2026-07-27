@@ -153,6 +153,58 @@
           }}
 
 
+    # Format and entry-vs-entry checks happen statically in init.yml; here the
+    # requested explicit ranges are checked against the assignments that
+    # already exist on this host. The account's own current entry is excluded
+    # (replacing it is legitimate); entries written for earlier list members of
+    # this run are already in the files and therefore covered as well.
+    - name: "Config | Rootless | Assert explicit ranges do not overlap assignments of other accounts"
+      ansible.builtin.assert:
+        that:
+          - (__host_podman_ru_subid_conflicts | ansible.builtin.length) == 0
+        fail_msg: >-
+          Explicit subordinate ID range(s) for '{{ __host_podman_ru['name'] }}'
+          overlap existing assignments of other accounts:
+          {{ __host_podman_ru_subid_conflicts | ansible.builtin.join(', ') }}.
+          Overlapping ranges give different accounts the same host IDs and
+          weaken the isolation between rootless users; choose a free range.
+        quiet: true
+      vars:
+        __host_podman_ru_subid_content: >-
+          {{
+            __host_podman_ru_subid_slurp['results']
+            | ansible.builtin.map(attribute='content', default='')
+            | ansible.builtin.map('ansible.builtin.b64decode')
+            | ansible.builtin.list
+          }}
+        __host_podman_ru_subid_conflicts: >-
+          {%- set __ns = namespace(items=[]) -%}
+          {%- for __pair in [['subuid', 0], ['subgid', 1]] -%}
+          {%-   if __host_podman_ru[__pair[0]] is ansible.builtin.defined -%}
+          {%-     set __value = __host_podman_ru[__pair[0]] | ansible.builtin.string -%}
+          {%-     set __start = (__value.split(':')[0] | ansible.builtin.int) -%}
+          {%-     set __end = __start + (__value.split(':')[1] | ansible.builtin.int) -%}
+          {%-     for __line in __host_podman_ru_subid_content[__pair[1]].split('\n') -%}
+          {%-       set __parts = __line.split(':') -%}
+          {%-       if ((__parts | ansible.builtin.length) == 3)
+                       and (__parts[0] != __host_podman_ru['name'])
+                       and (__parts[1] is ansible.builtin.match('^[0-9]+$'))
+                       and (__parts[2] is ansible.builtin.match('^[0-9]+$')) -%}
+          {%-         set __other_start = (__parts[1] | ansible.builtin.int) -%}
+          {%-         set __other_end = __other_start + (__parts[2] | ansible.builtin.int) -%}
+          {%-         if (__start < __other_end) and (__other_start < __end) -%}
+          {%-           set _ = __ns.items.append(__pair[0] ~ " " ~ __value ~ " vs. '" ~ __line ~ "'") -%}
+          {%-         endif -%}
+          {%-       endif -%}
+          {%-     endfor -%}
+          {%-   endif -%}
+          {%- endfor -%}
+          {{ __ns.items }}
+      when: >-
+        (__host_podman_ru['subuid'] is ansible.builtin.defined)
+        or (__host_podman_ru['subgid'] is ansible.builtin.defined)
+
+
     - name: "Config | Rootless | Ensure subordinate UID range for '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.lineinfile:
         path: "{{ __host_podman_subuid_file_path }}"

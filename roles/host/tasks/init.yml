@@ -248,3 +248,98 @@
     - host_podman_auto_update | ansible.builtin.bool
     - host_podman_service_state != 'unmanaged'
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+
+
+# host_podman_rootless_users writes to the shared /etc/subuid and /etc/subgid
+# files, so broken or colliding input must be rejected before anything gets
+# written. Everything below is static; overlap against the assignments already
+# present on the target host is checked at execution time in
+# config/rootless_user.yml (their content is only known there).
+- name: "Init | Assert account names in host_podman_rootless_users are unique"
+  ansible.builtin.assert:
+    that:
+      - (__host_podman_ru_names | ansible.builtin.length) == (__host_podman_ru_names | ansible.builtin.unique | ansible.builtin.length)
+    fail_msg: >-
+      Each 'name' in host_podman_rootless_users must be unique; one or more
+      duplicate account names were found. Duplicate entries would silently
+      overwrite each other's subordinate ID ranges and per-user configuration.
+    success_msg: "All account names in host_podman_rootless_users are unique."
+  vars:
+    __host_podman_ru_names: >-
+      {{
+        host_podman_rootless_users
+        | ansible.builtin.map(attribute='name')
+        | ansible.builtin.list
+      }}
+  when:
+    - (host_podman_rootless_users | ansible.builtin.length) > 0
+
+
+- name: "Init | Assert explicit subordinate ID ranges are well-formed"
+  ansible.builtin.assert:
+    that:
+      - (__host_podman_subid_format_offenders | ansible.builtin.length) == 0
+    fail_msg: >-
+      Invalid subordinate ID range value(s) in host_podman_rootless_users:
+      {{ __host_podman_subid_format_offenders | ansible.builtin.join(', ') }}.
+      'subuid' and 'subgid' take '<start>:<count>' with two positive integers
+      (e.g. '100000:65536'). A malformed line would break rootless Podman for
+      the account, and a start of 0 would map the host's root ID into the
+      user namespace.
+    success_msg: "All explicit subordinate ID ranges are well-formed."
+  vars:
+    __host_podman_subid_format_offenders: >-
+      {%- set __ns = namespace(items=[]) -%}
+      {%- for __entry in host_podman_rootless_users -%}
+      {%-   for __key in ['subuid', 'subgid'] -%}
+      {%-     if __entry[__key] is ansible.builtin.defined -%}
+      {%-       set __value = __entry[__key] | ansible.builtin.string -%}
+      {%-       if __value is not ansible.builtin.match('^[0-9]+:[0-9]+$') -%}
+      {%-         set _ = __ns.items.append(__entry['name'] ~ " " ~ __key ~ " '" ~ __value ~ "' (not <start>:<count>)") -%}
+      {%-       elif ((__value.split(':')[0] | ansible.builtin.int) < 1) or ((__value.split(':')[1] | ansible.builtin.int) < 1) -%}
+      {%-         set _ = __ns.items.append(__entry['name'] ~ " " ~ __key ~ " '" ~ __value ~ "' (start and count must be >= 1)") -%}
+      {%-       endif -%}
+      {%-     endif -%}
+      {%-   endfor -%}
+      {%- endfor -%}
+      {{ __ns.items }}
+  when:
+    - (host_podman_rootless_users | ansible.builtin.length) > 0
+
+
+- name: "Init | Assert explicit subordinate ID ranges do not overlap between entries"
+  ansible.builtin.assert:
+    that:
+      - (__host_podman_subid_overlap_offenders | ansible.builtin.length) == 0
+    fail_msg: >-
+      Overlapping explicit subordinate ID range(s) in host_podman_rootless_users:
+      {{ __host_podman_subid_overlap_offenders | ansible.builtin.join(', ') }}.
+      Overlapping ranges give different accounts the same host IDs and weaken
+      the isolation between rootless users; assign disjoint ranges.
+    success_msg: "The explicit subordinate ID ranges are disjoint."
+  vars:
+    # Only well-formed values are compared; malformed ones were already
+    # rejected by the assert above.
+    __host_podman_subid_overlap_offenders: >-
+      {%- set __ns = namespace(items=[]) -%}
+      {%- for __key in ['subuid', 'subgid'] -%}
+      {%-   set __ranges = [] -%}
+      {%-   for __entry in host_podman_rootless_users -%}
+      {%-     if (__entry[__key] is ansible.builtin.defined)
+                 and ((__entry[__key] | ansible.builtin.string) is ansible.builtin.match('^[0-9]+:[0-9]+$')) -%}
+      {%-       set __start = ((__entry[__key] | ansible.builtin.string).split(':')[0] | ansible.builtin.int) -%}
+      {%-       set __count = ((__entry[__key] | ansible.builtin.string).split(':')[1] | ansible.builtin.int) -%}
+      {%-       set _ = __ranges.append({'name': __entry['name'], 'start': __start, 'end': __start + __count}) -%}
+      {%-     endif -%}
+      {%-   endfor -%}
+      {%-   for __i in range(__ranges | ansible.builtin.length) -%}
+      {%-     for __j in range(__i + 1, __ranges | ansible.builtin.length) -%}
+      {%-       if (__ranges[__i]['start'] < __ranges[__j]['end']) and (__ranges[__j]['start'] < __ranges[__i]['end']) -%}
+      {%-         set _ = __ns.items.append(__key ~ " of '" ~ __ranges[__i]['name'] ~ "' and '" ~ __ranges[__j]['name'] ~ "'") -%}
+      {%-       endif -%}
+      {%-     endfor -%}
+      {%-   endfor -%}
+      {%- endfor -%}
+      {{ __ns.items }}
+  when:
+    - (host_podman_rootless_users | ansible.builtin.length) > 1

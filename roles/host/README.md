@@ -538,6 +538,10 @@ account does not exist. Create accounts beforehand (e.g. with the
 `/var/lib/podman/<name>` for a service account keeps all of its container
 data in a central location; see the role's README for details and examples.
 
+Account names must be unique within the list; duplicate entries are
+rejected (they would silently overwrite each other's subordinate ID
+ranges and per-user configuration).
+
 Example:
 
 ```yaml
@@ -604,6 +608,14 @@ Subordinate UID range for the account in `start:count` format (e.g.
 ensures a range exists and automatically allocates a free one if
 missing.
 
+Explicit values are validated before anything gets written: both
+numbers must be positive integers (a malformed line would break
+rootless Podman, and a start of `0` would map the host's root ID),
+and the range must not overlap the explicit range of another list
+entry or an existing `/etc/subuid` assignment of another account
+(overlapping ranges give different accounts the same host IDs and
+weaken the isolation between rootless users).
+
 - **Type**: `str`
 - **Required**: No
 
@@ -615,6 +627,10 @@ Subordinate GID range for the account in `start:count` format (e.g.
 `100000:65536`, see `man subgid`). If unset (the default), the role
 ensures a range exists and automatically allocates a free one if
 missing.
+
+Explicit values are validated like `subuid` (positive `start:count`
+integers, no overlap with another entry's explicit range or an
+existing `/etc/subgid` assignment of another account).
 
 - **Type**: `str`
 - **Required**: No

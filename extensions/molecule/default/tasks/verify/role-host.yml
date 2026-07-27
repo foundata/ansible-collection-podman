@@ -508,3 +508,128 @@
 - name: "Molecule | Verify | Timer settings | non-systemd: restore the saved settings"
   ansible.builtin.set_fact:
     host_podman_auto_update_timer_settings: "{{ __testing_timer_settings_saved }}"
+
+
+## Subordinate ID validation (init-only)
+#
+# host_podman_rootless_users writes to the shared /etc/subuid and /etc/subgid
+# files; malformed or colliding input must be rejected before anything gets
+# written. Each rejection case runs the role's init with one invalid list and
+# expects the run to fail inside the subordinate ID validation.
+
+- name: "Molecule | Verify | Run subordinate ID rejection checks (init-only)"
+  ansible.builtin.include_tasks:
+    file: >-
+      {{ (lookup('ansible.builtin.env', 'MOLECULE_SCENARIO_DIRECTORY')
+          | ansible.builtin.default('../../default')) }}/tasks/verify/checks/subid-reject.yml
+  vars:
+    __testing_reject_case: "{{ item }}"
+  loop:
+    - label: "duplicate account names"
+      users:
+        - name: "dupuser"
+        - name: "dupuser"
+    - label: "malformed range separator"
+      users:
+        - name: "someuser"
+          subuid: "20000-20000"
+    - label: "non-numeric range"
+      users:
+        - name: "someuser"
+          subgid: "abc:65536"
+    - label: "zero start (would map the host's root ID)"
+      users:
+        - name: "someuser"
+          subuid: "0:65536"
+    - label: "zero count"
+      users:
+        - name: "someuser"
+          subgid: "20000:0"
+    - label: "overlapping explicit ranges between entries"
+      users:
+        - name: "someuser"
+          subuid: "20000:20000"
+        - name: "otheruser"
+          subuid: "30000:20000"
+  loop_control:
+    label: "{{ item['label'] }}"
+
+
+## Subordinate ID validation: overlap with existing assignments (integration)
+#
+# The init-only cases above are static; the overlap against ranges already
+# assigned on the host is only checkable at execution time. The converge gave
+# 'containerapp' the explicit range 20000:20000 ([20000, 40000)), so a second
+# account requesting 30000:20000 ([30000, 50000)) must be rejected by the
+# config tasks before anything is written to /etc/subuid.
+
+- name: "Molecule | Verify | Subid overlap integration: create a second test account"
+  ansible.builtin.user:
+    name: "overlapuser"
+    state: "present"
+    system: true
+    password: "!"
+
+
+- name: "Molecule | Verify | Subid overlap integration: run the role and expect rejection"
+  block:
+
+    - name: "Molecule | Verify | Subid overlap integration: include the role with an overlapping range"
+      ansible.builtin.include_role:
+        name: "foundata.podman.host"
+      vars:
+        host_podman_rootless_users:
+          - name: "overlapuser"
+            # linger off: the account is removed again right below and must
+            # not keep a running user manager behind
+            linger: false
+            subuid: "30000:20000"
+
+    - name: "Molecule | Verify | Subid overlap integration: fail because the overlap was accepted"
+      ansible.builtin.fail:
+        msg: >-
+          The subordinate UID range 30000:20000 overlapping the existing
+          containerapp assignment 20000:20000 was accepted by the role.
+
+  rescue:
+
+    - name: "Molecule | Verify | Subid overlap integration: assert the run failed in the overlap check"
+      ansible.builtin.assert:
+        that:
+          - >-
+            (ansible_failed_task['name'] | ansible.builtin.default(''))
+            is ansible.builtin.search('do not overlap assignments of other accounts')
+        fail_msg: >-
+          The run failed, but not in the overlap check as expected
+          (failed task: '{{ ansible_failed_task['name'] | ansible.builtin.default('unknown') }}').
+        success_msg: "The overlapping explicit range was rejected at execution time."
+
+  always:
+
+    - name: "Molecule | Verify | Subid overlap integration: query /etc/subuid for the second account"
+      ansible.builtin.command:
+        argv:
+          - "/usr/bin/grep"
+          - "-E"
+          - "^overlapuser:"
+          - "/etc/subuid"
+          - "/etc/subgid"
+      register: __testing_subid_overlap_grep
+      changed_when: false
+      failed_when:
+        - __testing_subid_overlap_grep['rc'] not in [0, 1]
+
+    - name: "Molecule | Verify | Subid overlap integration: assert nothing was written for the second account"
+      ansible.builtin.assert:
+        that:
+          - __testing_subid_overlap_grep['rc'] == 1
+        fail_msg: >-
+          The rejected range still ended up in /etc/subuid or /etc/subgid:
+          {{ __testing_subid_overlap_grep['stdout_lines'] | ansible.builtin.default([]) }}
+        success_msg: "The rejected range was not written to /etc/subuid or /etc/subgid."
+
+    - name: "Molecule | Verify | Subid overlap integration: remove the second test account"
+      ansible.builtin.user:
+        name: "overlapuser"
+        state: "absent"
+        remove: true
