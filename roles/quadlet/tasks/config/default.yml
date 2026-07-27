@@ -169,7 +169,7 @@
       {{
         __quadlet_podman_find_result['files']
         | ansible.builtin.map(attribute='path')
-        | ansible.builtin.reject('in',
+        | ansible.builtin.reject('ansible.builtin.in',
             __quadlet_podman_units_effective
             | ansible.builtin.map(attribute='filename')
             | ansible.builtin.map('ansible.builtin.regex_replace', '^', __quadlet_podman_unit_dir_path ~ '/')

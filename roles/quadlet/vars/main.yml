@@ -205,9 +205,9 @@ __quadlet_podman_dependency_keys:
 # tasks/init.yml sets __quadlet_podman_units_effective.
 __quadlet_podman_services_managed: >-
   {{
-    (__quadlet_podman_units_effective | ansible.builtin.selectattr('type', 'eq', 'pod')
+    (__quadlet_podman_units_effective | ansible.builtin.selectattr('type', 'ansible.builtin.eq', 'pod')
      | ansible.builtin.selectattr('has_install') | ansible.builtin.map(attribute='service') | ansible.builtin.list)
-    + (__quadlet_podman_units_effective | ansible.builtin.rejectattr('type', 'eq', 'pod')
+    + (__quadlet_podman_units_effective | ansible.builtin.rejectattr('type', 'ansible.builtin.eq', 'pod')
        | ansible.builtin.selectattr('has_install') | ansible.builtin.map(attribute='service') | ansible.builtin.list)
   }}
 

@@ -225,27 +225,27 @@
     __quadlet_podman_user_exists: >-
       {{
         (not (__quadlet_podman_rootless | ansible.builtin.bool))
-        or (ansible_facts['getent_passwd'][quadlet_podman_user] is not none)
+        or (ansible_facts['getent_passwd'][quadlet_podman_user] is not ansible.builtin.none)
       }}
     __quadlet_podman_user_uid: >-
       {{
         ansible_facts['getent_passwd'][quadlet_podman_user][1]
         if ((__quadlet_podman_rootless | ansible.builtin.bool)
-            and ansible_facts['getent_passwd'][quadlet_podman_user] is not none)
+            and ansible_facts['getent_passwd'][quadlet_podman_user] is not ansible.builtin.none)
         else ''
       }}
     __quadlet_podman_user_gid: >-
       {{
         ansible_facts['getent_passwd'][quadlet_podman_user][2]
         if ((__quadlet_podman_rootless | ansible.builtin.bool)
-            and ansible_facts['getent_passwd'][quadlet_podman_user] is not none)
+            and ansible_facts['getent_passwd'][quadlet_podman_user] is not ansible.builtin.none)
         else ''
       }}
     __quadlet_podman_user_home: >-
       {{
         ansible_facts['getent_passwd'][quadlet_podman_user][4]
         if ((__quadlet_podman_rootless | ansible.builtin.bool)
-            and ansible_facts['getent_passwd'][quadlet_podman_user] is not none)
+            and ansible_facts['getent_passwd'][quadlet_podman_user] is not ansible.builtin.none)
         else ''
       }}
 
