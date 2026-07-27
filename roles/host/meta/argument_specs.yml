@@ -421,6 +421,15 @@ argument_specs:
           (file contexts for the paths listed in `host_podman_selinux_label_paths`,
           including running `restorecon` on changes). Only effective on platforms
           with SELinux; ignored elsewhere.
+
+          The role records every equivalence rule it creates in
+          `/etc/selinux/ansible-foundata-podman-host-equivalences` and reconciles
+          that manifest on each run: rules for paths removed from
+          `host_podman_selinux_label_paths` are deleted again and their trees
+          relabeled back to the default policy, and uninstalling the role removes
+          all recorded rules. If set to `false`, the role does not touch SELinux at
+          all: previously created rules and the manifest are deliberately left as
+          they are (set it back to `true` with the desired path list to clean up).
         type: "bool"
         default: true
 
@@ -434,6 +443,11 @@ argument_specs:
 
           Do not add paths below `/var/lib/containers` itself; they are already
           covered by the distribution's default policy.
+
+          Removing a path from this list removes the role-created equivalence rule
+          again on the next run and relabels the tree back to the default policy,
+          so a reused directory does not keep container-storage labels (see
+          `host_podman_selinux_manage` for the reconciliation contract).
 
           Only effective when `host_podman_selinux_manage` is `true` and the
           platform uses SELinux.

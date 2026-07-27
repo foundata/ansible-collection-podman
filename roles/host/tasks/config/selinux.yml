@@ -1,0 +1,144 @@
+# SELinux file context equivalence reconciliation for container storage paths.
+#
+# semanage equivalence rules cannot carry an ownership marker, so the role
+# records every rule it creates in a manifest file (one target path per line,
+# see vars/main.yml) and reconciles it against the declared paths on each run:
+# rules whose path is no longer declared are removed again and their trees are
+# relabeled back to the default policy.
+#
+# Included from config/default.yml (declared paths from
+# host_podman_selinux_label_paths) and from setup/uninstall/default.yml (empty
+# declared list, removing every recorded rule). Callers pass
+# __host_podman_selinux_declared_paths and gate the include on
+# host_podman_selinux_manage and an enabled SELinux.
+
+---
+
+- name: "Config | SELinux | Read the manifest of role-created equivalence rules"
+  ansible.builtin.slurp:
+    src: "{{ __host_podman_selinux_manifest_file_path }}"
+  register: __host_podman_selinux_manifest_slurp
+  failed_when:
+    # tolerate a missing manifest (first run; treated as empty below)
+    - __host_podman_selinux_manifest_slurp['msg'] is ansible.builtin.defined
+    - "'file not found' not in (__host_podman_selinux_manifest_slurp['msg'] | ansible.builtin.lower)"
+
+
+- name: "Config | SELinux | Determine recorded rules whose path is no longer declared"
+  ansible.builtin.set_fact:
+    __host_podman_selinux_stale_paths: >-
+      {{
+        (__host_podman_selinux_manifest_slurp['content'] | ansible.builtin.default('') | ansible.builtin.b64decode).split('\n')
+        | ansible.builtin.map('ansible.builtin.trim')
+        | ansible.builtin.select('ansible.builtin.match', '^/')
+        | ansible.builtin.reject('ansible.builtin.in', __host_podman_selinux_declared_paths)
+        | ansible.builtin.list
+      }}
+
+
+- name: "Config | SELinux | Install SELinux management tooling"
+  ansible.builtin.package:
+    name: "{{ __host_podman_selinux_tools_packages }}"
+    state: "present"
+  when:
+    - (__host_podman_selinux_tools_packages | ansible.builtin.length) > 0
+    - >-
+      ((__host_podman_selinux_declared_paths | ansible.builtin.length) > 0)
+      or ((__host_podman_selinux_stale_paths | ansible.builtin.length) > 0)
+
+
+# File context equivalence: the path gets labeled by the same rules as
+# /var/lib/containers (the default container storage location), which
+# covers all sub-paths and label types in one rule.
+- name: "Config | SELinux | Set file context equivalence for storage path"
+  community.general.sefcontext:
+    target: "{{ item }}"
+    substitute: "/var/lib/containers"
+    state: "present"
+    reload: true
+  register: __host_podman_sefcontext_result
+  loop: "{{ __host_podman_selinux_declared_paths }}"
+
+
+# Only after the rule (dis)appeared: newly created files inherit the
+# correct context automatically, and re-running restorecon -F over live
+# container storage would strip the MCS category labels Podman applies.
+# A handler is unsuitable as the per-path result gating is needed
+# (noqa: no-handler).
+- name: "Config | SELinux | Apply file contexts (restorecon)" # noqa: no-handler
+  ansible.builtin.command:
+    argv:
+      - "{{ __host_podman_restorecon_exec_path }}"
+      - "-F" # reset the full context, including the user part
+      - "-r"
+      - "-v"
+      - "{{ item['item'] }}"
+  register: __host_podman_restorecon_result
+  changed_when:
+    - (__host_podman_restorecon_result['stdout'] | ansible.builtin.length) > 0
+  when:
+    - item is ansible.builtin.changed
+  loop: "{{ __host_podman_sefcontext_result['results'] | ansible.builtin.default([]) }}"
+  loop_control:
+    label: "{{ item['item'] }}"
+
+
+- name: "Config | SELinux | Remove file context equivalences for paths no longer declared"
+  community.general.sefcontext:
+    target: "{{ item }}"
+    substitute: "/var/lib/containers"
+    state: "absent"
+    reload: true
+  register: __host_podman_sefcontext_removal_result
+  loop: "{{ __host_podman_selinux_stale_paths }}"
+
+
+- name: "Config | SELinux | Check which de-listed paths still exist"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: __host_podman_selinux_stale_stat
+  loop: "{{ __host_podman_selinux_stale_paths }}"
+  loop_control:
+    label: "{{ item }}"
+
+
+# Relabel the trees of de-listed paths back to the default policy context, so
+# a later reuse of the directory does not inherit container-storage labels.
+# Same per-path result gating as the apply task above (noqa: no-handler).
+- name: "Config | SELinux | Reset file contexts of de-listed paths (restorecon)" # noqa: no-handler
+  ansible.builtin.command:
+    argv:
+      - "{{ __host_podman_restorecon_exec_path }}"
+      - "-F" # reset the full context, including the user part
+      - "-r"
+      - "-v"
+      - "{{ item['item'] }}"
+  register: __host_podman_restorecon_reset_result
+  changed_when:
+    - (__host_podman_restorecon_reset_result['stdout'] | ansible.builtin.length) > 0
+  when:
+    - item is ansible.builtin.changed
+    - __host_podman_selinux_stale_stat['results'][__host_podman_selinux_stale_idx]['stat']['exists']
+  loop: "{{ __host_podman_sefcontext_removal_result['results'] | ansible.builtin.default([]) }}"
+  loop_control:
+    index_var: "__host_podman_selinux_stale_idx"
+    label: "{{ item['item'] }}"
+
+
+- name: "Config | SELinux | Record the role-created equivalence rules in the manifest"
+  ansible.builtin.copy:
+    content: "{{ ([__host_podman_file_marker] + (__host_podman_selinux_declared_paths | ansible.builtin.list)) | ansible.builtin.join('\n') }}\n"
+    dest: "{{ __host_podman_selinux_manifest_file_path }}"
+    owner: "{{ __host_podman_config_file_owner }}"
+    group: "{{ __host_podman_config_file_group }}"
+    mode: "{{ __host_podman_config_file_mode }}"
+  when:
+    - (__host_podman_selinux_declared_paths | ansible.builtin.length) > 0
+
+
+- name: "Config | SELinux | Remove the manifest (no rules declared)"
+  ansible.builtin.file:
+    path: "{{ __host_podman_selinux_manifest_file_path }}"
+    state: "absent"
+  when:
+    - (__host_podman_selinux_declared_paths | ansible.builtin.length) == 0

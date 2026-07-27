@@ -136,55 +136,19 @@
 
 ### SELinux file contexts for additional container storage paths
 
+# Reconciled against a manifest of role-created rules (see
+# tasks/config/selinux.yml): rules for paths removed from
+# host_podman_selinux_label_paths are deleted again. With
+# host_podman_selinux_manage set to false the role keeps its hands off
+# entirely; existing rules and the manifest stay as they are.
 - name: "Config | Default | Manage SELinux file contexts for additional storage paths"
+  ansible.builtin.include_tasks:
+    file: "{{ role_path }}/tasks/config/selinux.yml"
+  vars:
+    __host_podman_selinux_declared_paths: "{{ host_podman_selinux_label_paths }}"
   when:
     - host_podman_selinux_manage
     - ansible_facts['selinux']['status'] | ansible.builtin.default('') == 'enabled'
-    - (host_podman_selinux_label_paths | ansible.builtin.length) > 0
-  block:
-
-    - name: "Config | Default | Install SELinux management tooling"
-      ansible.builtin.package:
-        name: "{{ __host_podman_selinux_tools_packages }}"
-        state: "present"
-      when:
-        - (__host_podman_selinux_tools_packages | ansible.builtin.length) > 0
-
-
-    # File context equivalence: the path gets labeled by the same rules as
-    # /var/lib/containers (the default container storage location), which
-    # covers all sub-paths and label types in one rule.
-    - name: "Config | Default | Set SELinux file context equivalence for storage path"
-      community.general.sefcontext:
-        target: "{{ item }}"
-        substitute: "/var/lib/containers"
-        state: "present"
-        reload: true
-      register: __host_podman_sefcontext_result
-      loop: "{{ host_podman_selinux_label_paths }}"
-
-
-    # Only after the rule (dis)appeared: newly created files inherit the
-    # correct context automatically, and re-running restorecon -F over live
-    # container storage would strip the MCS category labels Podman applies.
-    # A handler is unsuitable as the per-path result gating is needed
-    # (noqa: no-handler).
-    - name: "Config | Default | Apply SELinux file contexts (restorecon)" # noqa: no-handler
-      ansible.builtin.command:
-        argv:
-          - "{{ __host_podman_restorecon_exec_path }}"
-          - "-F" # reset the full context, including the user part
-          - "-r"
-          - "-v"
-          - "{{ item['item'] }}"
-      register: __host_podman_restorecon_result
-      changed_when:
-        - (__host_podman_restorecon_result['stdout'] | ansible.builtin.length) > 0
-      when:
-        - item is ansible.builtin.changed
-      loop: "{{ __host_podman_sefcontext_result['results'] }}"
-      loop_control:
-        label: "{{ item['item'] }}"
 
 
 ### Automatic container image updates (system podman-auto-update.timer)

@@ -29,6 +29,20 @@
     label: "{{ __host_podman_ru_raw['name'] }}"
 
 
+# semanage rules cannot carry a marker; the manifest written by the config
+# tasks records the rules this role created, and an empty declared list
+# removes them all. With host_podman_selinux_manage set to false the role
+# keeps its hands off and existing rules stay (documented contract).
+- name: "Setup | Uninstall | Remove the role-created SELinux equivalence rules"
+  ansible.builtin.include_tasks:
+    file: "{{ role_path }}/tasks/config/selinux.yml"
+  vars:
+    __host_podman_selinux_declared_paths: []
+  when:
+    - host_podman_selinux_manage
+    - ansible_facts['selinux']['status'] | ansible.builtin.default('') == 'enabled'
+
+
 - name: "Setup | Uninstall | Remove the managed configuration drop-ins"
   ansible.builtin.file:
     path: "{{ item }}"

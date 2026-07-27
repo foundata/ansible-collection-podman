@@ -140,6 +140,14 @@ __host_podman_paths_neutralize: {}
 __host_podman_selinux_tools_packages: []
 
 
+# Manifest recording the SELinux file context equivalence rules created by
+# this role (one target path per line below the marker). semanage rules cannot
+# carry an ownership marker themselves, so this file is the ownership record
+# that allows removing a rule again when its path leaves
+# host_podman_selinux_label_paths or the role gets uninstalled.
+__host_podman_selinux_manifest_file_path: "/etc/selinux/ansible-foundata-podman-host-equivalences"
+
+
 ### Engine configuration files
 #
 # Managed strictly opt-in: when the effective settings dictionary is empty

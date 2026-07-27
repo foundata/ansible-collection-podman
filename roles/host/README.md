@@ -183,7 +183,7 @@ The following variables can be configured for this role:
 | `host_podman_auto_update_timer_settings` | `dict` | No | `{}` | Configuration for the systemd timer that triggers the automatic container image update run (`podman-auto-update.timer`). This dictionary controls when and how often updates are checked and applied.<br><br>These settings map to systemd timer unit […](#variable-host_podman_auto_update_timer_settings) |
 | `host_podman_docker_compat` | `bool` | No | `false` | If set to `true`, Docker compatibility gets installed and enabled: the `podman-docker` package (providing a `docker` command alias) and the Podman API socket (`podman.socket`, providing a Docker-compatible API at `/run/podman/podman.sock` for tools […](#variable-host_podman_docker_compat) |
 | `host_podman_rootless_users` | `list` | No | `[]` | List of existing user accounts to be enabled for rootless Podman usage.<br><br>For each listed account, the role ensures the prerequisites for running rootless containers that start at boot and keep running without an interactive login session: […](#variable-host_podman_rootless_users) |
-| `host_podman_selinux_manage` | `bool` | No | `true` | Whether the role manages SELinux settings related to container storage (file contexts for the paths listed in `host_podman_selinux_label_paths`, including running `restorecon` on changes). Only effective on platforms with SELinux; ignored elsewhere. |
+| `host_podman_selinux_manage` | `bool` | No | `true` | Whether the role manages SELinux settings related to container storage (file contexts for the paths listed in `host_podman_selinux_label_paths`, including running `restorecon` on changes). Only effective on platforms with SELinux; ignored […](#variable-host_podman_selinux_manage) |
 | `host_podman_selinux_label_paths` | `list` | No | `[]` | List of additional filesystem paths that should carry the SELinux file contexts required for container storage (equivalent to `/var/lib/containers`). Use this when relocating storage, e.g. for a custom rootful `graphroot` or a central rootless […](#variable-host_podman_selinux_label_paths) |
 
 ### `host_podman_state`<a id="variable-host_podman_state"></a>
@@ -699,6 +699,15 @@ Whether the role manages SELinux settings related to container storage
 including running `restorecon` on changes). Only effective on platforms
 with SELinux; ignored elsewhere.
 
+The role records every equivalence rule it creates in
+`/etc/selinux/ansible-foundata-podman-host-equivalences` and reconciles
+that manifest on each run: rules for paths removed from
+`host_podman_selinux_label_paths` are deleted again and their trees
+relabeled back to the default policy, and uninstalling the role removes
+all recorded rules. If set to `false`, the role does not touch SELinux at
+all: previously created rules and the manifest are deliberately left as
+they are (set it back to `true` with the desired path list to clean up).
+
 - **Type**: `bool`
 - **Required**: No
 - **Default**: `true`
@@ -717,6 +726,11 @@ custom rootful `graphroot` or a central rootless storage tree like
 
 Do not add paths below `/var/lib/containers` itself; they are already
 covered by the distribution's default policy.
+
+Removing a path from this list removes the role-created equivalence rule
+again on the next run and relabels the tree back to the default policy,
+so a reused directory does not keep container-storage labels (see
+`host_podman_selinux_manage` for the reconciliation contract).
 
 Only effective when `host_podman_selinux_manage` is `true` and the
 platform uses SELinux.
