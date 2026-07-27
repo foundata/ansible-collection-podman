@@ -92,6 +92,9 @@
     - "quadlet_podman: restart application services"
 
 
+# The restart notify makes the removal effective for running services: a
+# started container keeps its bind-mounted file open (and its environment)
+# until recreated, so without a restart it would keep using stale data.
 - name: "Config | Default | Remove files of the application (item state is absent)"
   ansible.builtin.file:
     path: "{{ __quadlet_podman_file_item['dest'] }}"
@@ -102,6 +105,8 @@
   loop_control:
     loop_var: "__quadlet_podman_file_item"
     label: "{{ __quadlet_podman_file_item['dest'] }}"
+  notify:
+    - "quadlet_podman: restart application services"
 
 
 # Existing secrets stay untouched unless the item sets force (rotation); this
