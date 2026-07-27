@@ -134,6 +134,14 @@ argument_specs:
           scope. See the role's README for examples on centralizing rootless storage
           (e.g. via `rootless_storage_path` or service account home directories).
 
+          `storage.conf` has no drop-in mechanism, so supplying settings replaces
+          the whole distribution file; the pre-role original is saved to
+          `storage.conf.ansible-orig` before the first overwrite. Setting this
+          variable back to an empty mapping (or uninstalling the role) restores
+          that original, or removes the role-written file when no original existed
+          (Podman then falls back to its built-in defaults, which match the role's
+          base values).
+
           See `man containers-storage.conf` or
           https://github.com/containers/storage/blob/main/docs/containers-storage.conf.5.md
           for all available settings.
@@ -181,6 +189,13 @@ argument_specs:
           untouched. If a policy is supplied, it is rendered verbatim as JSON and
           replaces the file. Distributing signing keys and configuring signature
           lookaside storage (`registries.d`) is out of scope for this role.
+
+          The pre-role state is saved to `policy.json.ansible-orig` before the
+          first overwrite (a zero-length file records that no pre-role
+          `policy.json` existed). Setting this variable back to an empty mapping
+          (or uninstalling the role) restores exactly that state - the saved
+          original, or no file at all - so no stale role-written trust policy
+          stays in effect.
 
           Example (require GPG-signed images from one registry, accept anything
           else):

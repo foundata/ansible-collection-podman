@@ -39,6 +39,16 @@
       RandomizedDelaySec: "30m"
     host_podman_selinux_label_paths:
       - "/var/lib/podman"
+    # Values matching the built-in defaults and the distribution stock policy:
+    # this exercises the whole-file write path (incl. saving the pre-role
+    # originals) without changing the effective behavior mid-scenario. The
+    # clear/restore transition is covered in the verify tasks.
+    host_podman_storage:
+      storage:
+        driver: "overlay"
+    host_podman_policy:
+      default:
+        - type: "insecureAcceptAnything"
     host_podman_rootless_users:
       - name: "containerapp"
         # Explicit low range: the molecule instances are containers with only

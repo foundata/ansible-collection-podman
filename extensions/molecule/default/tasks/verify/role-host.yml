@@ -633,3 +633,211 @@
         name: "overlapuser"
         state: "absent"
         remove: true
+
+
+## storage.conf / policy.json transition contract
+#
+# Supplying host_podman_storage / host_podman_policy replaces whole
+# distribution files; clearing them again (or uninstalling) must restore the
+# saved pre-role original instead of leaving the last role-written file in
+# effect. This block is self-contained: it captures the current state (the
+# earlier role runs in this verify used empty settings, which must have
+# cleared the converge-managed state already), applies settings, clears them
+# again and compares against the capture. The converge state is re-applied at
+# the end.
+
+# Not every platform ships a stock policy.json or storage.conf, so the
+# captures tolerate absence and the assertions compare against the captured
+# existence state.
+- name: "Molecule | Verify | Transition: check for a current policy.json"
+  ansible.builtin.stat:
+    path: "/etc/containers/policy.json"
+  register: __testing_transition_policy_pre_stat
+
+
+- name: "Molecule | Verify | Transition: read the current policy.json (if any)"
+  ansible.builtin.slurp:
+    src: "/etc/containers/policy.json"
+  register: __testing_transition_policy_pre
+  when:
+    - __testing_transition_policy_pre_stat['stat']['exists']
+
+
+- name: "Molecule | Verify | Transition: check for a current storage.conf"
+  ansible.builtin.stat:
+    path: "/etc/containers/storage.conf"
+  register: __testing_transition_storage_pre_stat
+
+
+- name: "Molecule | Verify | Transition: read the current storage.conf (if any)"
+  ansible.builtin.slurp:
+    src: "/etc/containers/storage.conf"
+  register: __testing_transition_storage_pre
+  when:
+    - __testing_transition_storage_pre_stat['stat']['exists']
+
+
+# This also proves the implicit clear: the earlier role includes in this
+# verify ran with empty storage/policy settings against the converge-managed
+# state, which must have restored the stock files.
+- name: "Molecule | Verify | Transition: assert the starting point is unmanaged"
+  ansible.builtin.assert:
+    that:
+      - >-
+        (not __testing_transition_storage_pre_stat['stat']['exists'])
+        or ('Managed by Ansible (foundata.podman.host)'
+            not in (__testing_transition_storage_pre['content'] | ansible.builtin.b64decode))
+    fail_msg: >-
+      storage.conf still carries the role marker before the transition test,
+      so the earlier role runs with empty settings did not clear the managed
+      state.
+    success_msg: "The starting point is unmanaged (the implicit clears worked)."
+
+
+- name: "Molecule | Verify | Transition: apply storage and policy settings"
+  ansible.builtin.include_role:
+    name: "foundata.podman.host"
+  vars:
+    host_podman_storage:
+      storage:
+        driver: "overlay"
+    host_podman_policy:
+      default:
+        - type: "insecureAcceptAnything"
+
+
+- name: "Molecule | Verify | Transition: read the managed storage.conf and policy.json"
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  register: __testing_transition_managed_slurp
+  loop:
+    - "/etc/containers/storage.conf"
+    - "/etc/containers/policy.json"
+
+
+- name: "Molecule | Verify | Transition: check for the saved pre-role originals"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: __testing_transition_backup_stat
+  loop:
+    - "/etc/containers/storage.conf.ansible-orig"
+    - "/etc/containers/policy.json.ansible-orig"
+
+
+- name: "Molecule | Verify | Transition: assert the managed state and the saved originals"
+  ansible.builtin.assert:
+    that:
+      - >-
+        'Managed by Ansible (foundata.podman.host)'
+        in (__testing_transition_managed_slurp['results'][0]['content'] | ansible.builtin.b64decode)
+      - >-
+        (__testing_transition_managed_slurp['results'][1]['content']
+         | ansible.builtin.b64decode | ansible.builtin.from_json)
+        == {'default': [{'type': 'insecureAcceptAnything'}]}
+      # the storage original is saved exactly when there was a pre-role file;
+      # the policy backup always exists (zero-length sentinel when no pre-role
+      # policy.json existed)
+      - >-
+        __testing_transition_backup_stat['results'][0]['stat']['exists']
+        == __testing_transition_storage_pre_stat['stat']['exists']
+      - __testing_transition_backup_stat['results'][1]['stat']['exists']
+      - >-
+        (__testing_transition_backup_stat['results'][1]['stat']['size'] | ansible.builtin.int > 0)
+        == __testing_transition_policy_pre_stat['stat']['exists']
+    fail_msg: >-
+      Applying storage/policy settings did not produce the expected managed
+      files and saved originals.
+    success_msg: "The managed files are in place and the pre-role originals were saved."
+
+
+- name: "Molecule | Verify | Transition: assert the saved storage.conf original matches the pre-role state"
+  ansible.builtin.slurp:
+    src: "/etc/containers/storage.conf.ansible-orig"
+  register: __testing_transition_storage_backup
+  when:
+    - __testing_transition_storage_pre_stat['stat']['exists']
+
+
+- name: "Molecule | Verify | Transition: check the saved originals carry the pre-role content"
+  ansible.builtin.assert:
+    that:
+      - >-
+        (not __testing_transition_storage_pre_stat['stat']['exists'])
+        or (__testing_transition_storage_backup['content'] == __testing_transition_storage_pre['content'])
+    fail_msg: "The saved storage.conf original does not match the pre-role file."
+    success_msg: "The saved storage.conf original matches the pre-role file."
+
+
+- name: "Molecule | Verify | Transition: clear the settings again"
+  ansible.builtin.include_role:
+    name: "foundata.podman.host"
+  vars:
+    host_podman_storage: {}
+    host_podman_policy: {}
+
+
+- name: "Molecule | Verify | Transition: check the resulting files and backups"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: __testing_transition_post_stat
+  loop:
+    - "/etc/containers/storage.conf"
+    - "/etc/containers/storage.conf.ansible-orig"
+    - "/etc/containers/policy.json.ansible-orig"
+    - "/etc/containers/policy.json"
+
+
+- name: "Molecule | Verify | Transition: read the resulting policy.json (if any)"
+  ansible.builtin.slurp:
+    src: "/etc/containers/policy.json"
+  register: __testing_transition_policy_post
+  when:
+    - __testing_transition_post_stat['results'][3]['stat']['exists']
+
+
+- name: "Molecule | Verify | Transition: read the restored storage.conf (if any)"
+  ansible.builtin.slurp:
+    src: "/etc/containers/storage.conf"
+  register: __testing_transition_storage_post
+  when:
+    - __testing_transition_post_stat['results'][0]['stat']['exists']
+
+
+- name: "Molecule | Verify | Transition: assert the pre-role state was restored"
+  ansible.builtin.assert:
+    that:
+      # storage.conf: restored original or removed, matching the pre-role state
+      - >-
+        __testing_transition_post_stat['results'][0]['stat']['exists']
+        == __testing_transition_storage_pre_stat['stat']['exists']
+      - >-
+        (not __testing_transition_storage_pre_stat['stat']['exists'])
+        or (__testing_transition_storage_post['content'] == __testing_transition_storage_pre['content'])
+      # policy.json: the pre-role state is in effect again (the saved trust
+      # policy, or no file at all when none existed before)
+      - >-
+        __testing_transition_post_stat['results'][3]['stat']['exists']
+        == __testing_transition_policy_pre_stat['stat']['exists']
+      - >-
+        (not __testing_transition_policy_pre_stat['stat']['exists'])
+        or (__testing_transition_policy_post['content'] == __testing_transition_policy_pre['content'])
+      # the saved originals are cleaned up
+      - not __testing_transition_post_stat['results'][1]['stat']['exists']
+      - not __testing_transition_post_stat['results'][2]['stat']['exists']
+    fail_msg: >-
+      Clearing the storage/policy settings did not restore the pre-role state
+      (stale role-written files or leftover saved originals remain).
+    success_msg: "Clearing the settings restored the pre-role state."
+
+
+# Leave the system in the converge-managed state, as converge configured it.
+- name: "Molecule | Verify | Transition: re-apply the converge state"
+  ansible.builtin.include_role:
+    name: "foundata.podman.host"
+  vars:
+    host_podman_storage:
+      storage:
+        driver: "overlay"
+    host_podman_policy:
+      default:
+        - type: "insecureAcceptAnything"

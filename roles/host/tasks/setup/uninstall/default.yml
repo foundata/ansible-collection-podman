@@ -57,29 +57,92 @@
     - "host_podman: systemd daemon-reload"
 
 
-# storage.conf might be a distribution file this role never touched; only
-# remove it when it carries the role's marker. policy.json is deliberately
-# left alone: JSON cannot carry a marker comment and removing the image trust
-# policy would break any remaining containers tooling.
+# storage.conf and policy.json have no drop-in mechanism, so the config tasks
+# replace the whole file and save the pre-role original next to it (see
+# vars/main.yml). Restore that original here; without one, the role-written
+# storage.conf (identified via its marker) is removed, while policy.json is
+# kept as removing the image trust policy would break any remaining
+# containers tooling. Distribution files the role never touched stay as they
+# are.
 - name: "Setup | Uninstall | Check whether storage.conf is role-managed"
   ansible.builtin.command:
     argv:
       - "{{ __host_podman_grep_exec_path }}"
-      - "-l"
+      - "-q"
       - "-s" # no error messages about nonexistent files
       - "{{ __host_podman_file_marker }}"
       - "{{ __host_podman_storage_file_path }}"
-  register: __host_podman_managed_files_result
+  register: __host_podman_storage_managed_result
   changed_when: false
   failed_when:
-    - __host_podman_managed_files_result['rc'] not in [0, 1, 2]
+    - __host_podman_storage_managed_result['rc'] not in [0, 1, 2]
 
 
-- name: "Setup | Uninstall | Remove role-managed storage.conf"
+# Result indexes: 0 = saved storage.conf original, 1 = saved policy.json
+# original.
+- name: "Setup | Uninstall | Check for saved pre-role originals"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  register: __host_podman_uninstall_backups_stat
+  loop:
+    - "{{ __host_podman_storage_backup_file_path }}"
+    - "{{ __host_podman_policy_backup_file_path }}"
+  loop_control:
+    label: "{{ item }}"
+
+
+- name: "Setup | Uninstall | Restore the pre-role storage.conf"
+  ansible.builtin.copy:
+    src: "{{ __host_podman_storage_backup_file_path }}"
+    dest: "{{ __host_podman_storage_file_path }}"
+    remote_src: true
+    mode: "preserve"
+  when:
+    - __host_podman_storage_managed_result['rc'] == 0
+    - __host_podman_uninstall_backups_stat['results'][0]['stat']['exists']
+
+
+- name: "Setup | Uninstall | Remove the role-written storage.conf (no original saved)"
+  ansible.builtin.file:
+    path: "{{ __host_podman_storage_file_path }}"
+    state: "absent"
+  when:
+    - __host_podman_storage_managed_result['rc'] == 0
+    - not __host_podman_uninstall_backups_stat['results'][0]['stat']['exists']
+
+
+# A zero-length saved original is the sentinel for "no pre-role policy.json
+# existed" (see the config tasks); restoring then means removing the file.
+- name: "Setup | Uninstall | Restore the pre-role policy.json"
+  ansible.builtin.copy:
+    src: "{{ __host_podman_policy_backup_file_path }}"
+    dest: "{{ __host_podman_policy_file_path }}"
+    remote_src: true
+    mode: "preserve"
+  when:
+    - __host_podman_uninstall_backups_stat['results'][1]['stat']['exists']
+    - (__host_podman_uninstall_backups_stat['results'][1]['stat']['size'] | ansible.builtin.int) > 0
+
+
+- name: "Setup | Uninstall | Remove policy.json (no pre-role file existed)"
+  ansible.builtin.file:
+    path: "{{ __host_podman_policy_file_path }}"
+    state: "absent"
+  when:
+    - __host_podman_uninstall_backups_stat['results'][1]['stat']['exists']
+    - (__host_podman_uninstall_backups_stat['results'][1]['stat']['size'] | ansible.builtin.int) == 0
+
+
+- name: "Setup | Uninstall | Remove the saved pre-role originals"
   ansible.builtin.file:
     path: "{{ item }}"
     state: "absent"
-  loop: "{{ __host_podman_managed_files_result['stdout_lines'] }}"
+  loop:
+    - "{{ __host_podman_storage_backup_file_path }}"
+    - "{{ __host_podman_policy_backup_file_path }}"
   loop_control:
     label: "{{ item }}"
 

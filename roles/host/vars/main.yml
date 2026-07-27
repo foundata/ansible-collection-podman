@@ -214,6 +214,18 @@ __host_podman_registries_dropin_file_path: "{{ __host_podman_registries_dropin_d
 __host_podman_storage_file_path: "/etc/containers/storage.conf"
 __host_podman_policy_file_path: "/etc/containers/policy.json"
 
+
+# Pre-role originals of the fully-owned configuration files. storage.conf and
+# policy.json have no drop-in mechanism, so supplying settings replaces the
+# whole distribution file; the original is saved next to it before the first
+# overwrite. Clearing host_podman_storage / host_podman_policy again (or
+# uninstalling the role) restores the saved original instead of leaving the
+# last role-written file in effect. For policy.json (strict JSON, no marker
+# comment possible) the saved original also serves as the indicator that the
+# current file is role-written.
+__host_podman_storage_backup_file_path: "{{ __host_podman_storage_file_path }}.ansible-orig"
+__host_podman_policy_backup_file_path: "{{ __host_podman_policy_file_path }}.ansible-orig"
+
 __host_podman_config_dir_owner: "root"
 __host_podman_config_dir_group: "root"
 __host_podman_config_dir_mode: "u=rwx,g=rx,o=rx" # 0755

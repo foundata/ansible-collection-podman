@@ -103,9 +103,62 @@
     - (__host_podman_registries_effective | ansible.builtin.length) == 0
 
 
-# No drop-in mechanism exists for storage.conf, so the complete file gets
-# rendered (distribution base values come from __host_podman_storage_defaults).
-# Without user-supplied settings the distribution file stays untouched.
+# No drop-in mechanism exists for storage.conf and policy.json, so supplying
+# settings replaces the whole distribution file. The pre-role original is
+# saved once before the first overwrite; clearing the variable again (or
+# uninstalling the role) restores it, instead of leaving the last role-written
+# file in effect (which matters especially for a stale image trust policy).
+
+- name: "Config | Default | Check whether storage.conf is role-managed"
+  ansible.builtin.command:
+    argv:
+      - "{{ __host_podman_grep_exec_path }}"
+      - "-q"
+      - "-s" # no error messages about nonexistent files
+      - "{{ __host_podman_file_marker }}"
+      - "{{ __host_podman_storage_file_path }}"
+  register: __host_podman_storage_managed_result
+  changed_when: false
+  failed_when:
+    - __host_podman_storage_managed_result['rc'] not in [0, 1, 2]
+
+
+# Result indexes: 0 = storage.conf, 1 = its saved original,
+# 2 = policy.json, 3 = its saved original.
+- name: "Config | Default | Check for storage.conf, policy.json and their saved originals"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  register: __host_podman_transition_stat
+  loop:
+    - "{{ __host_podman_storage_file_path }}"
+    - "{{ __host_podman_storage_backup_file_path }}"
+    - "{{ __host_podman_policy_file_path }}"
+    - "{{ __host_podman_policy_backup_file_path }}"
+  loop_control:
+    label: "{{ item }}"
+
+
+# Save the distribution original exactly once: only a file that is not yet
+# role-managed (no marker) gets saved, so later runs never overwrite the
+# original with role-rendered content.
+- name: "Config | Default | Save the pre-role storage.conf before the first overwrite"
+  ansible.builtin.copy:
+    src: "{{ __host_podman_storage_file_path }}"
+    dest: "{{ __host_podman_storage_backup_file_path }}"
+    remote_src: true
+    mode: "preserve"
+    owner: "{{ __host_podman_config_file_owner }}"
+    group: "{{ __host_podman_config_file_group }}"
+  when:
+    - (host_podman_storage | ansible.builtin.length) > 0
+    - __host_podman_transition_stat['results'][0]['stat']['exists']
+    - __host_podman_storage_managed_result['rc'] != 0
+    - not __host_podman_transition_stat['results'][1]['stat']['exists']
+
+
 - name: "Config | Default | Create storage.conf"
   ansible.builtin.template:
     src: "storage.conf.j2"
@@ -121,8 +174,71 @@
     - (host_podman_storage | ansible.builtin.length) > 0
 
 
-# policy.json has no drop-in mechanism either; only (over)written when a
-# policy was supplied, otherwise the distribution's stock file stays untouched.
+- name: "Config | Default | Restore the pre-role storage.conf (settings cleared)"
+  ansible.builtin.copy:
+    src: "{{ __host_podman_storage_backup_file_path }}"
+    dest: "{{ __host_podman_storage_file_path }}"
+    remote_src: true
+    mode: "preserve"
+  when:
+    - (host_podman_storage | ansible.builtin.length) == 0
+    - __host_podman_storage_managed_result['rc'] == 0
+    - __host_podman_transition_stat['results'][1]['stat']['exists']
+
+
+# Without a saved original the removal restores the pre-role behavior:
+# Podman's built-in defaults match the role's base values (see vars/main.yml).
+- name: "Config | Default | Remove the role-written storage.conf (settings cleared, no original saved)"
+  ansible.builtin.file:
+    path: "{{ __host_podman_storage_file_path }}"
+    state: "absent"
+  when:
+    - (host_podman_storage | ansible.builtin.length) == 0
+    - __host_podman_storage_managed_result['rc'] == 0
+    - not __host_podman_transition_stat['results'][1]['stat']['exists']
+
+
+- name: "Config | Default | Remove the saved storage.conf original (settings cleared)"
+  ansible.builtin.file:
+    path: "{{ __host_podman_storage_backup_file_path }}"
+    state: "absent"
+  when:
+    - (host_podman_storage | ansible.builtin.length) == 0
+
+
+# policy.json cannot carry a marker comment (strict JSON), so the saved
+# original doubles as the role-management indicator: it exists exactly while
+# the role owns the file. When there is no pre-role policy.json at all, a
+# zero-length sentinel records that fact (a real policy is never empty);
+# without it, a later run would mistake the role-written file for the
+# original.
+- name: "Config | Default | Save the pre-role policy.json before the first overwrite"
+  ansible.builtin.copy:
+    src: "{{ __host_podman_policy_file_path }}"
+    dest: "{{ __host_podman_policy_backup_file_path }}"
+    remote_src: true
+    mode: "preserve"
+    owner: "{{ __host_podman_config_file_owner }}"
+    group: "{{ __host_podman_config_file_group }}"
+  when:
+    - (host_podman_policy | ansible.builtin.length) > 0
+    - __host_podman_transition_stat['results'][2]['stat']['exists']
+    - not __host_podman_transition_stat['results'][3]['stat']['exists']
+
+
+- name: "Config | Default | Record the absence of a pre-role policy.json (sentinel)"
+  ansible.builtin.copy:
+    content: ""
+    dest: "{{ __host_podman_policy_backup_file_path }}"
+    owner: "{{ __host_podman_config_file_owner }}"
+    group: "{{ __host_podman_config_file_group }}"
+    mode: "{{ __host_podman_config_file_mode }}"
+  when:
+    - (host_podman_policy | ansible.builtin.length) > 0
+    - not __host_podman_transition_stat['results'][2]['stat']['exists']
+    - not __host_podman_transition_stat['results'][3]['stat']['exists']
+
+
 - name: "Config | Default | Create policy.json (image trust policy)"
   ansible.builtin.copy:
     content: "{{ host_podman_policy | ansible.builtin.to_nice_json }}\n"
@@ -132,6 +248,41 @@
     mode: "{{ __host_podman_config_file_mode }}"
   when:
     - (host_podman_policy | ansible.builtin.length) > 0
+
+
+# Restores the pre-role state exactly: the saved original, or (zero-length
+# sentinel, see above) the absence of a policy.json. Without any saved
+# original the file is left alone: it is either a distribution file this role
+# never touched, or role state from before the save mechanism existed, where
+# guessing would be worse than keeping the effective policy visible.
+- name: "Config | Default | Restore the pre-role policy.json (policy cleared)"
+  ansible.builtin.copy:
+    src: "{{ __host_podman_policy_backup_file_path }}"
+    dest: "{{ __host_podman_policy_file_path }}"
+    remote_src: true
+    mode: "preserve"
+  when:
+    - (host_podman_policy | ansible.builtin.length) == 0
+    - __host_podman_transition_stat['results'][3]['stat']['exists']
+    - (__host_podman_transition_stat['results'][3]['stat']['size'] | ansible.builtin.int) > 0
+
+
+- name: "Config | Default | Remove policy.json (policy cleared, no pre-role file existed)"
+  ansible.builtin.file:
+    path: "{{ __host_podman_policy_file_path }}"
+    state: "absent"
+  when:
+    - (host_podman_policy | ansible.builtin.length) == 0
+    - __host_podman_transition_stat['results'][3]['stat']['exists']
+    - (__host_podman_transition_stat['results'][3]['stat']['size'] | ansible.builtin.int) == 0
+
+
+- name: "Config | Default | Remove the saved policy.json original (restored)"
+  ansible.builtin.file:
+    path: "{{ __host_podman_policy_backup_file_path }}"
+    state: "absent"
+  when:
+    - (host_podman_policy | ansible.builtin.length) == 0
 
 
 ### SELinux file contexts for additional container storage paths
