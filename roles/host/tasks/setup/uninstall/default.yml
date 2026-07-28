@@ -147,6 +147,17 @@
     label: "{{ item }}"
 
 
+# Removed on its own, not as part of the list below: the package is absent
+# when host_podman_docker_compat is false, and the dnf5 backend (Fedora)
+# reacts to a removal list mixing missing and installed packages with an
+# unrelated depsolve error ("conflicting requests"). Isolated missing-on-
+# absent removals are handled fine.
+- name: "Setup | Uninstall | Remove the Docker compatibility package"
+  ansible.builtin.package:
+    name: "{{ __host_podman_docker_compat_package }}"
+    state: "absent"
+
+
 - name: "Setup | Uninstall | Remove packages"
   ansible.builtin.package:
     name: "{{ __host_podman_packages_uninstall }}"

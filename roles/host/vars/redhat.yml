@@ -10,3 +10,11 @@
 # SELinux is active and host_podman_selinux_label_paths is non-empty).
 __host_podman_selinux_tools_packages:
   - "policycoreutils-python-utils"
+
+
+# Pulled in automatically as a dependency of podman on Red Hat platforms and
+# itself dependent on netavark: has to be listed for removal explicitly, the
+# dnf backends refuse to remove netavark while a dependent package stays
+# installed (Depsolve Error; the modules do not cascade like the dnf CLI).
+__host_podman_packages_uninstall_dependents:
+  - "containers-common-extra"

@@ -105,11 +105,20 @@ __host_podman_docker_compat_package: "podman-docker"
 # List of package names to be uninstalled when host_podman_state is set to
 # "absent". The platform-specific extras (e.g. "uidmap", "dbus-user-session"
 # on Debian/Ubuntu) are shared infrastructure other software may rely on and
-# are deliberately NOT removed.
+# are deliberately NOT removed. The Docker compatibility package is removed
+# in a separate task: it is not installed when host_podman_docker_compat is
+# false, and the dnf5 backend (Fedora) reacts to a removal list mixing
+# missing and installed packages with an unrelated depsolve error.
+# __host_podman_packages_uninstall_dependents lists packages the package
+# manager pulled in as dependencies which themselves depend on base packages:
+# without listing them the dnf5 backend (Fedora) refuses to remove the base
+# list ("containers-common-extra requires netavark", Depsolve Error) because
+# the module - unlike the dnf CLI - does not cascade to dependent packages.
+__host_podman_packages_uninstall_dependents: []
 __host_podman_packages_uninstall: >-
   {{
     __host_podman_packages_install_base
-    + [__host_podman_docker_compat_package]
+    + __host_podman_packages_uninstall_dependents
   }}
 
 
