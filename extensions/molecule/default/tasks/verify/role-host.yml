@@ -841,3 +841,91 @@
     host_podman_policy:
       default:
         - type: "insecureAcceptAnything"
+
+
+## Subordinate ID overlap rejection
+#
+# Two layers guard against overlapping subordinate ID ranges (overlaps give
+# different accounts the same host IDs): a static entry-vs-entry check in
+# init.yml and an execution-time check against the assignments already
+# present on the host in config/rootless_user.yml. Both are exercised here
+# with a block/rescue that asserts the expected assert task raised the
+# failure.
+
+- name: "Molecule | Verify | host | Overlap rejection: run init with overlapping list entries (must fail)"
+  block:
+
+    - name: "Molecule | Verify | host | Overlap rejection: include the role's init with overlapping entries"
+      ansible.builtin.include_role:
+        name: "foundata.podman.host"
+        tasks_from: "init"
+      vars:
+        host_podman_rootless_users:
+          - name: "overlapa"
+            subuid: "50000:2000"
+          - name: "overlapb"
+            subuid: "51000:2000"
+
+    - name: "Molecule | Verify | host | Overlap rejection: fail because overlapping list entries were accepted"
+      ansible.builtin.fail:
+        msg: "Overlapping explicit ranges within host_podman_rootless_users were accepted by init."
+
+  rescue:
+
+    - name: "Molecule | Verify | host | Overlap rejection: check the static init assert raised the failure"
+      ansible.builtin.assert:
+        that:
+          - ansible_failed_task['name'] is
+            ansible.builtin.search('do not overlap between entries')
+        fail_msg: >-
+          The failure was raised by '{{ ansible_failed_task['name'] }}', not by
+          the static overlap assert.
+        success_msg: >-
+          Overlapping explicit ranges between list entries are rejected by the
+          role's init.
+
+
+- name: "Molecule | Verify | host | Overlap rejection: plant a foreign subordinate UID assignment"
+  ansible.builtin.lineinfile:
+    path: "/etc/subuid"
+    line: "overlapvictim:60000:1000"
+    state: "present"
+
+
+- name: "Molecule | Verify | host | Overlap rejection: request a range overlapping the foreign assignment (must fail)"
+  block:
+
+    - name: "Molecule | Verify | host | Overlap rejection: run the role with the overlapping explicit range"
+      ansible.builtin.include_role:
+        name: "foundata.podman.host"
+      vars:
+        host_podman_state: "present"
+        host_podman_rootless_users:
+          - name: "containerapp"
+            subuid: "59500:1000"
+            subgid: "20000:20000"
+
+    - name: "Molecule | Verify | host | Overlap rejection: fail because the overlapping range was accepted"
+      ansible.builtin.fail:
+        msg: "An explicit range overlapping another account's assignment was accepted."
+
+  rescue:
+
+    - name: "Molecule | Verify | host | Overlap rejection: check the execution-time assert raised the failure"
+      ansible.builtin.assert:
+        that:
+          - ansible_failed_task['name'] is
+            ansible.builtin.search('do not overlap assignments of other accounts')
+        fail_msg: >-
+          The failure was raised by '{{ ansible_failed_task['name'] }}', not by
+          the execution-time overlap assert.
+        success_msg: >-
+          An explicit range overlapping an existing assignment of another
+          account is rejected at execution time.
+
+
+- name: "Molecule | Verify | host | Overlap rejection: remove the foreign subordinate UID assignment"
+  ansible.builtin.lineinfile:
+    path: "/etc/subuid"
+    line: "overlapvictim:60000:1000"
+    state: "absent"

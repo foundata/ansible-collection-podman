@@ -256,6 +256,24 @@
 
 # Same input as converge again: the previously added secret and file are now
 # de-listed (the rename scenario) and must be removed by the reconciliation.
+# The de-listing below removes a declared file (temp.env). That has to
+# restart the application services - a container consuming a removed file
+# would otherwise keep using the dead copy until an unrelated restart - so
+# the service start timestamp is recorded here and compared after the run
+# (plus handler flush).
+- name: "Molecule | Verify | quadlet | Reap: record the webtest start timestamp before de-listing"
+  ansible.builtin.command:
+    argv:
+      - "systemctl"
+      - "show"
+      - "webtest.service"
+      - "--property"
+      - "ActiveEnterTimestampMonotonic"
+      - "--value"
+  register: __testing_quadlet_reap_started_before
+  changed_when: false
+
+
 - name: "Molecule | Verify | quadlet | Reap: re-run the role without the additional resources"
   ansible.builtin.include_role:
     name: "foundata.podman.quadlet"
@@ -304,6 +322,38 @@
               - "multi-user.target"
 
 
+# The role notifies its restart handler for the removed file; run it now so
+# the restart can be asserted (handlers otherwise wait for the end of the play).
+- name: "Molecule | Verify | quadlet | Reap: flush the notified handlers"
+  ansible.builtin.meta: "flush_handlers"
+
+
+- name: "Molecule | Verify | quadlet | Reap: record the webtest start timestamp after de-listing"
+  ansible.builtin.command:
+    argv:
+      - "systemctl"
+      - "show"
+      - "webtest.service"
+      - "--property"
+      - "ActiveEnterTimestampMonotonic"
+      - "--value"
+  register: __testing_quadlet_reap_started_after
+  changed_when: false
+
+
+- name: "Molecule | Verify | quadlet | Reap: check the removed file triggered a service restart"
+  ansible.builtin.assert:
+    that:
+      - (__testing_quadlet_reap_started_after['stdout'] | ansible.builtin.int)
+        > (__testing_quadlet_reap_started_before['stdout'] | ansible.builtin.int)
+    fail_msg: >-
+      Removing a declared file did not restart the application services
+      (start timestamp {{ __testing_quadlet_reap_started_before['stdout'] }}
+      unchanged) - the container would keep using the dead bind-mount source
+      of the removed file until an unrelated restart.
+    success_msg: "Removing a declared file restarted the application services."
+
+
 - name: "Molecule | Verify | quadlet | Reap: query the Podman secrets after de-listing"
   ansible.builtin.command:
     argv:
@@ -348,21 +398,24 @@
 ## Registry logout reconciliation (offline)
 #
 # podman logout only edits the authentication file, so the reconciliation can
-# be verified without a reachable registry: craft an authfile entry, record
-# the registry in the manifest, run the role without quadlet_podman_registry_auth
-# and expect the entry to be logged out again.
+# be verified without a reachable registry: craft authfile entries, record
+# the registries in the manifest, run the role without quadlet_podman_registry_auth
+# and expect exactly the unclaimed entry to be logged out again. A second
+# application's manifest claims one of the registries: all applications of a
+# scope share the authfile, so a registry another application still declares
+# must survive the logout (its image pulls would break otherwise).
 
-- name: "Molecule | Verify | quadlet | Logout: craft an authfile entry"
+- name: "Molecule | Verify | quadlet | Logout: craft two authfile entries"
   ansible.builtin.copy:
     content: |
-      {"auths": {"registry.molecule.invalid": {"auth": "dGVzdDp0ZXN0"}}}
+      {"auths": {"registry.molecule.invalid": {"auth": "dGVzdDp0ZXN0"}, "registry-shared.molecule.invalid": {"auth": "dGVzdDp0ZXN0"}}}
     dest: "/etc/containers/auth.json"
     owner: "root"
     group: "root"
     mode: "u=rw,g=,o="
 
 
-- name: "Molecule | Verify | quadlet | Logout: record the registry in the manifest"
+- name: "Molecule | Verify | quadlet | Logout: record both registries in the manifest"
   ansible.builtin.copy:
     content: |
       # Managed by Ansible (foundata.podman.quadlet): app=webtest
@@ -370,9 +423,24 @@
         - /var/lib/webtest/app.env
       registries:
         - registry.molecule.invalid
+        - registry-shared.molecule.invalid
       secrets:
         - webtest_secret
     dest: "/etc/containers/systemd/.webtest.ansible-manifest"
+    owner: "root"
+    group: "root"
+    mode: "u=rw,g=r,o="
+
+
+- name: "Molecule | Verify | quadlet | Logout: plant a second application's manifest claiming the shared registry"
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible (foundata.podman.quadlet): app=otherapp
+      files: []
+      registries:
+        - registry-shared.molecule.invalid
+      secrets: []
+    dest: "/etc/containers/systemd/.otherapp.ansible-manifest"
     owner: "root"
     group: "root"
     mode: "u=rw,g=r,o="
@@ -442,20 +510,41 @@
   register: __testing_quadlet_logout_manifest
 
 
-- name: "Molecule | Verify | quadlet | Logout: check the credentials were removed"
+- name: "Molecule | Verify | quadlet | Logout: check the unclaimed entry was removed, the claimed one kept"
   ansible.builtin.assert:
     that:
+      # the registry no other application declares is logged out (not a
+      # substring of the shared registry's name, so plain matching is safe)
       - >-
         'registry.molecule.invalid' not in
         (__testing_quadlet_logout_authfile['content'] | ansible.builtin.default('') | ansible.builtin.b64decode)
+      # the registry the second application's manifest still declares survives
+      - >-
+        'registry-shared.molecule.invalid' in
+        (__testing_quadlet_logout_authfile['content'] | ansible.builtin.default('') | ansible.builtin.b64decode)
+      # the webtest manifest no longer records any registry
       - >-
         ((__testing_quadlet_logout_manifest['content'] | ansible.builtin.b64decode
           | ansible.builtin.from_yaml)['registries'] | ansible.builtin.default([])
          | ansible.builtin.length) == 0
     fail_msg: >-
-      The de-listed registry login survived the reconciliation (stale
-      credentials would linger in the authfile forever).
-    success_msg: "The de-listed registry was logged out and unrecorded."
+      The logout reconciliation did not remove exactly the unclaimed entry: a
+      de-listed login lingering forever, or a registry another application
+      still uses got logged out (breaking its image pulls).
+    success_msg: >-
+      Exactly the unclaimed registry was logged out; the one claimed by the
+      second application survived.
+
+
+# The planted second-application manifest and the crafted authfile only
+# existed for this test; the webtest application never logged in anywhere.
+- name: "Molecule | Verify | quadlet | Logout: remove the crafted test files"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: "absent"
+  loop:
+    - "/etc/containers/systemd/.otherapp.ansible-manifest"
+    - "/etc/containers/auth.json"
 
 
 ## Complete removal via the manifest (runs last on purpose)
@@ -527,3 +616,104 @@
     success_msg: >-
       state "absent" removed all manifest-recorded resources and kept the
       persistent data.
+
+
+## Complete removal of the rootless application
+
+- name: "Molecule | Verify | quadlet | Absent: remove the usertest application (rootless)"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "usertest"
+    quadlet_podman_state: "absent"
+    quadlet_podman_user: "containerapp"
+
+
+- name: "Molecule | Verify | quadlet | Absent: check the rootless artifacts"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: __testing_quadlet_absent_rootless_stat
+  loop:
+    - "/var/lib/podman/containerapp/.config/containers/systemd/usertest.container"
+    - "/var/lib/podman/containerapp/.config/containers/systemd/.usertest.ansible-manifest"
+
+
+- name: "Molecule | Verify | quadlet | Absent: check the rootless application is fully removed"
+  ansible.builtin.assert:
+    that:
+      - not __testing_quadlet_absent_rootless_stat['results'][0]['stat']['exists']
+      - not __testing_quadlet_absent_rootless_stat['results'][1]['stat']['exists']
+    fail_msg: >-
+      state "absent" left rootless unit files or the manifest behind in the
+      user scope.
+    success_msg: "state \"absent\" removed the rootless application."
+
+
+## Complete removal of the host role (runs after the applications are gone:
+## it removes the Podman packages and reverts the rootless enablement the
+## applications depend on)
+
+- name: "Molecule | Verify | host absent: uninstall the foundata.podman.host role"
+  ansible.builtin.include_role:
+    name: "foundata.podman.host"
+  vars:
+    host_podman_state: "absent"
+    host_podman_selinux_label_paths:
+      - "/var/lib/podman"
+    host_podman_rootless_users:
+      - name: "containerapp"
+        subuid: "20000:20000"
+        subgid: "20000:20000"
+
+
+- name: "Molecule | Verify | host absent: check the remaining artifacts"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: __testing_host_absent_stat
+  loop:
+    - "/etc/containers/containers.conf.d/50-managed.conf"
+    - "/etc/systemd/system/podman-auto-update.timer.d/00-managed.conf"
+    - "/var/lib/systemd/linger/containerapp"
+    - "/var/lib/podman/containerapp/.config/containers/containers.conf"
+    - "/var/lib/podman/containerapp/.config/containers/storage.conf"
+    - "/var/lib/podman/containerapp/.config/containers/registries.conf"
+    - "/usr/bin/podman"
+
+
+- name: "Molecule | Verify | host absent: query the rootless account and its subordinate IDs"
+  ansible.builtin.getent:
+    database: "passwd"
+    key: "containerapp"
+    fail_key: false
+
+
+- name: "Molecule | Verify | host absent: read /etc/subuid"
+  ansible.builtin.slurp:
+    src: "/etc/subuid"
+  register: __testing_host_absent_subuid
+
+
+- name: "Molecule | Verify | host absent: check the role reverted its changes and kept shared account state"
+  ansible.builtin.assert:
+    that:
+      # managed drop-ins, linger flag and per-user configs are gone
+      - not __testing_host_absent_stat['results'][0]['stat']['exists']
+      - not __testing_host_absent_stat['results'][1]['stat']['exists']
+      - not __testing_host_absent_stat['results'][2]['stat']['exists']
+      - not __testing_host_absent_stat['results'][3]['stat']['exists']
+      - not __testing_host_absent_stat['results'][4]['stat']['exists']
+      - not __testing_host_absent_stat['results'][5]['stat']['exists']
+      # the packages are removed
+      - not __testing_host_absent_stat['results'][6]['stat']['exists']
+      # shared account properties are deliberately kept (documented behavior):
+      # the account itself and its subordinate ID assignments
+      - ansible_facts['getent_passwd']['containerapp'] is not ansible.builtin.none
+      - >-
+        (__testing_host_absent_subuid['content'] | ansible.builtin.b64decode)
+        is ansible.builtin.search('^containerapp:', multiline=true)
+    fail_msg: >-
+      state "absent" left role-managed host configuration behind, or removed
+      shared account state (account, subordinate IDs) it has to keep.
+    success_msg: >-
+      state "absent" reverted the host configuration and kept the shared
+      account state.
