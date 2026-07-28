@@ -112,19 +112,19 @@
 
     - name: "Config | Rootless | Compute subordinate ID facts for '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.set_fact:
-        __host_podman_ru_subuid_present: >-
+        __host_podman_ru_subuid_line_count: >-
           {{
             __host_podman_ru_subid_content[0]
             | ansible.builtin.split('\n')
             | ansible.builtin.select('match', '^' ~ (__host_podman_ru['name'] | ansible.builtin.regex_escape) ~ ':')
-            | ansible.builtin.length > 0
+            | ansible.builtin.length
           }}
-        __host_podman_ru_subgid_present: >-
+        __host_podman_ru_subgid_line_count: >-
           {{
             __host_podman_ru_subid_content[1]
             | ansible.builtin.split('\n')
             | ansible.builtin.select('match', '^' ~ (__host_podman_ru['name'] | ansible.builtin.regex_escape) ~ ':')
-            | ansible.builtin.length > 0
+            | ansible.builtin.length
           }}
         # Next free range start: the highest end of all existing ranges in both
         # files (ranges are "name:start:count", so end = start + count), with
@@ -205,6 +205,31 @@
         or (__host_podman_ru['subgid'] is ansible.builtin.defined)
 
 
+    # newuidmap(1)/newgidmap(1) treat multiple lines of one account as
+    # cumulative ranges, while the lineinfile tasks below only replace the
+    # last matching line. Pre-existing duplicate lines would therefore stay
+    # active alongside the managed entry and silently expand the account's
+    # host-ID mappings. Only the last line is kept: that is the line
+    # lineinfile manages, so the result converges with what the role would
+    # have written anyway.
+    - name: "Config | Rootless | Remove duplicate subordinate ID entries for '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.replace:
+        path: "{{ __host_podman_ru_dedup['path'] }}"
+        regexp: >-
+          ^{{ __host_podman_ru['name'] | ansible.builtin.regex_escape }}:[^\n]*\n(?=[\s\S]*?^{{ __host_podman_ru['name'] | ansible.builtin.regex_escape }}:)
+        replace: ""
+      loop:
+        - path: "{{ __host_podman_subuid_file_path }}"
+          count: "{{ __host_podman_ru_subuid_line_count }}"
+        - path: "{{ __host_podman_subgid_file_path }}"
+          count: "{{ __host_podman_ru_subgid_line_count }}"
+      loop_control:
+        loop_var: "__host_podman_ru_dedup"
+        label: "{{ __host_podman_ru_dedup['path'] }}"
+      when:
+        - (__host_podman_ru_dedup['count'] | ansible.builtin.int) > 1
+
+
     - name: "Config | Rootless | Ensure subordinate UID range for '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.lineinfile:
         path: "{{ __host_podman_subuid_file_path }}"
@@ -222,7 +247,8 @@
           }}
       when:
         # enforce explicit ranges; leave existing automatic assignments alone
-        - (__host_podman_ru['subuid'] is ansible.builtin.defined) or (not __host_podman_ru_subuid_present)
+        - (__host_podman_ru['subuid'] is ansible.builtin.defined)
+          or ((__host_podman_ru_subuid_line_count | ansible.builtin.int) == 0)
 
 
     - name: "Config | Rootless | Ensure subordinate GID range for '{{ __host_podman_ru['name'] }}'"
@@ -242,7 +268,8 @@
           }}
       when:
         # enforce explicit ranges; leave existing automatic assignments alone
-        - (__host_podman_ru['subgid'] is ansible.builtin.defined) or (not __host_podman_ru_subgid_present)
+        - (__host_podman_ru['subgid'] is ansible.builtin.defined)
+          or ((__host_podman_ru_subgid_line_count | ansible.builtin.int) == 0)
 
 
     ## Lingering (persistent per-user systemd instance, required for services
