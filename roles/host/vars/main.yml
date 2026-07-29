@@ -192,14 +192,29 @@ __host_podman_registries_effective: >-
     | ansible.builtin.combine(host_podman_registries, recursive=true)
   }}
 
-# storage.conf gets fully rendered (no drop-in support in containers-storage),
-# so the defaults carry the upstream base values to keep the resulting file
-# complete and valid. Only rendered when the user supplied settings.
-__host_podman_storage_defaults:
-  storage:
-    driver: "overlay"
-    runroot: "/run/containers/storage"
-    graphroot: "/var/lib/containers/storage"
+# storage.conf gets fully rendered (no drop-in support in containers-storage).
+# The rendered base keys differ per platform because the Podman builds do:
+# - The Debian and openSUSE builds have no compiled-in storage defaults and
+#   refuse a storage.conf without explicit runroot and graphroot ("runroot
+#   must be set" / "graphroot must be set"). Their Podman (< 6.0) resolves
+#   rootless storage independently of these keys.
+# - Podman >= 6.0 (e.g. CentOS Stream 10) applies explicit runroot/graphroot
+#   from /etc/containers/storage.conf to rootless users as well
+#   (rootless_storage_path is deprecated), which would point them at the
+#   root-owned rootful storage. Upstream ships both keys commented out there,
+#   so they must be omitted and rootful/rootless resolve their usual
+#   per-context defaults.
+# Only rendered when the user supplied settings.
+__host_podman_storage_defaults: >-
+  {{
+    {'storage': {'driver': 'overlay'}}
+    | ansible.builtin.combine(
+        {'storage': {'runroot': '/run/containers/storage',
+                     'graphroot': '/var/lib/containers/storage'}}
+        if (ansible_facts['os_family'] | ansible.builtin.lower) in ['debian', 'suse']
+        else {},
+        recursive=true)
+  }}
 __host_podman_storage_overwrite: {}
 __host_podman_storage_effective: >-
   {{
