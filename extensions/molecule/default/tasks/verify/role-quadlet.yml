@@ -98,17 +98,9 @@
     key: "containerapp"
 
 
-# The rootless START is not testable on all platforms in this nested testing
-# environment; see the comment in tasks/converge/role-quadlet.yml (must match
-# the list used there).
-- name: "Molecule | Verify | quadlet | Set the platforms without nested rootless start support"
-  ansible.builtin.set_fact:
-    __testing_quadlet_rootless_start_excluded:
-      - "molecule-almalinux10"
-      - "molecule-centosstream10"
-      - "molecule-opensuseleap160"
-
-
+# The molecule instances are virtual machines, so the rootless START is
+# testable on every platform (see the comment in
+# tasks/converge/role-quadlet.yml).
 - name: "Molecule | Verify | quadlet | Query the usertest service state (rootless)"
   ansible.builtin.command:
     argv:
@@ -123,8 +115,6 @@
     DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ ansible_facts['getent_passwd']['containerapp'][1] }}/bus"
   register: __testing_quadlet_usertest_active_result
   changed_when: false
-  when:
-    - inventory_hostname not in __testing_quadlet_rootless_start_excluded
 
 
 - name: "Molecule | Verify | quadlet | Check the usertest service is active (rootless)"
@@ -132,8 +122,6 @@
     that:
       - __testing_quadlet_usertest_active_result['stdout'] == 'active'
     quiet: true
-  when:
-    - inventory_hostname not in __testing_quadlet_rootless_start_excluded
 
 
 ## Application manifest and cleanup reconciliation (rootful "webtest")

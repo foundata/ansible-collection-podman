@@ -3,74 +3,84 @@
 # See the official documentation for details on this file and all settings:
 # https://docs.ansible.com/projects/molecule/configuration/
 #
-# This scenario uses Podman to create and manage a container based testing
-# environment. See extensions/molecule/README.md for requirements and usage
-# details.
+# This collection manages Podman hosts, so the test instances must be able to
+# run Podman (rootful and rootless) natively: all platforms use QEMU/KVM
+# virtual machines (type: "libvirt") instead of containers. Containers would
+# need nested Podman workarounds (fuse-overlayfs pinning, logind unmasking,
+# setuid ID mapping helpers) and still cannot start rootless containers on
+# every platform. See extensions/molecule/README.md for requirements and
+# usage details.
 
 ---
 
 driver:
   name: "default"
   options:
-    managed: false
-    login_cmd_template: "podman exec -it {instance} bash"
-    ansible_connection_options:
-      ansible_connection: "podman"
+    managed: true
+    # Resolved per instance from the instance config written by the create
+    # playbooks, so "molecule login" works for containers and VMs alike.
+    login_cmd_template: "{login_cmd}"
 
 
 # Target platforms for testing
 platforms:
-  # Using foundata Integration Test Target (ITT) images which aim to replicate a
-  # "VM-like" testing environment and provide a fully functional systemd.
-  #
-  # The platform list is deliberately smaller than in other collections: the
-  # roles require Podman >= 5.x which rules out Debian 12, Ubuntu 22.04/24.04
-  # and the Enterprise Linux 9 family.
-  #
-  # privileged is needed because the roles run Podman containers INSIDE the
-  # test containers (nested containers, user namespaces, per-user systemd
-  # instances).
+  # Platform keys for type: "libvirt" (QEMU/KVM virtual machines from vendor
+  # cloud images via a session libvirt daemon, no root privileges needed):
+  #   image (required):          URL of a cloud image (qcow2, cloud-init
+  #                              inside) or an absolute local path to one
+  #   ssh_port (required):       unique local port for the SSH port forward
+  #   image_checksum (optional): e.g. "sha512:...", off by default (trust in
+  #                              vendor and TLS, like the ":latest" ITT images)
+  #   memory (optional):         RAM in MiB, default 2048
+  #   vcpus (optional):          default 2
+  #   disk_size (optional):      virtual disk size, default "10G"
+  #   extra_disks (optional):    additional blank disks (e.g. for testing
+  #                              storage management): list of mappings with
+  #                              "serial" (required, becomes
+  #                              /dev/disk/by-id/virtio-<serial>) and "size"
+  #                              (default "4G")
 
   # Debian 13 (Trixie)
   - name: "molecule-debian13"
-    image: "quay.io/foundata/debian13-itt:latest"
-    systemd: true
-    privileged: true
+    type: "libvirt"
+    image: "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2"
+    ssh_port: 2201
 
   # Ubuntu 26.04 LTS (Resolute Raccoon)
   - name: "molecule-ubuntu2604"
-    image: "quay.io/foundata/ubuntu2604-itt:latest"
-    systemd: true
-    privileged: true
+    type: "libvirt"
+    image: "https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img" # .img is qcow2
+    ssh_port: 2203
 
   # AlmaLinux 10 (best effort RHEL 10 (Red Hat Enterprise Linux))
   - name: "molecule-almalinux10"
-    image: "quay.io/foundata/almalinux10-itt:latest"
-    systemd: true
-    privileged: true
+    type: "libvirt"
+    image: "https://repo.almalinux.org/almalinux/10/cloud/x86_64/images/AlmaLinux-10-GenericCloud-latest.x86_64.qcow2"
+    ssh_port: 2206
 
   # CentOS Stream 10
   - name: "molecule-centosstream10"
-    image: "quay.io/foundata/centosstream10-itt:latest"
-    systemd: true
-    privileged: true
+    type: "libvirt"
+    image: "https://cloud.centos.org/centos/10-stream/x86_64/images/CentOS-Stream-GenericCloud-10-latest.x86_64.qcow2"
+    ssh_port: 2208
 
-  # Fedora 44
+  # Fedora 44 (no "latest" alias upstream; release images are immutable, bump the URL on new releases)
   - name: "molecule-fedora44"
-    image: "quay.io/foundata/fedora44-itt:latest"
-    systemd: true
-    privileged: true
-  # Fedora 43
-  - name: "molecule-fedora43"
-    image: "quay.io/foundata/fedora43-itt:latest"
-    systemd: true
-    privileged: true
+    type: "libvirt"
+    image: "https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2"
+    ssh_port: 2210
 
-  # openSUSE Leap 16.0
+  # Fedora 43 (no "latest" alias upstream; release images are immutable, bump the URL on new releases)
+  - name: "molecule-fedora43"
+    type: "libvirt"
+    image: "https://download.fedoraproject.org/pub/fedora/linux/releases/43/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-43-1.6.x86_64.qcow2"
+    ssh_port: 2211
+
+  # openSUSE Leap 16.0 (unversioned alias alongside build-suffixed files)
   - name: "molecule-opensuseleap160"
-    image: "quay.io/foundata/opensuseleap160-itt:latest"
-    systemd: true
-    privileged: true
+    type: "libvirt"
+    image: "https://download.opensuse.org/distribution/leap/16.0/appliances/Leap-16.0-Minimal-VM.x86_64-Cloud.qcow2"
+    ssh_port: 2212
 
 
 # Ansible dependencies (collections, roles) of this Molecule scenario
@@ -107,13 +117,13 @@ provisioner:
     connection:
       pipelining: true
   playbooks:
-    create: "../shared/playbooks/create-podman.yml"
+    create: "../shared/playbooks/create-dispatch.yml"
     prepare: "../shared/playbooks/prepare.yml"
     converge: "../shared/playbooks/converge.yml"
     side_effect: "../shared/playbooks/side_effect.yml"
     verify: "../shared/playbooks/verify.yml"
     cleanup: "../shared/playbooks/cleanup.yml"
-    destroy: "../shared/playbooks/destroy-podman.yml"
+    destroy: "../shared/playbooks/destroy-dispatch.yml"
 
 
 verifier:

@@ -51,9 +51,9 @@
         - type: "insecureAcceptAnything"
     host_podman_rootless_users:
       - name: "containerapp"
-        # Explicit low range: the molecule instances are containers with only
-        # 65536 mapped UIDs, so the automatically allocated range (starting at
-        # 100000) would not exist inside them. Real target systems (VMs, bare
-        # metal) do not need this.
+        # Explicit range: functionally not needed on the VM instances, but it
+        # exercises the explicit-range code path and makes the overlap
+        # rejection tests in the verify stage deterministic (they reference
+        # ranges relative to this one).
         subuid: "20000:20000"
         subgid: "20000:20000"
