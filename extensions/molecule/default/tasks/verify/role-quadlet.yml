@@ -149,6 +149,27 @@
     success_msg: "The rootless manifest is root-owned and out of the account's reach."
 
 
+# An administrator's own unit file (no ownership marker): the cleanup and
+# uninstall sweeps below must leave it alone even though it lives in the unit
+# directory. The content mentions the webtest marker as a substring on
+# purpose: ownership requires the exact marker line, a mere mention (e.g.
+# quoted in a comment) must not get the file deleted. Planted before the reap
+# re-runs so both the cleanup and the uninstall sweeps process it.
+- name: "Molecule | Verify | quadlet | Plant an administrator-owned unit file without the marker"
+  ansible.builtin.copy:
+    dest: "/etc/containers/systemd/admin-own-decoy.container"
+    content: |
+      # hand-made by the administrator, not Ansible. Files containing the
+      # exact "# Managed by Ansible (foundata.podman.quadlet): app=webtest"
+      # line are owned by the webtest application; this one merely quotes it.
+      [Container]
+      ContainerName=admin-own-decoy
+      Image=quay.io/libpod/testimage:20241011
+    owner: "root"
+    group: "root"
+    mode: "u=rw,g=r,o="
+
+
 ## Application manifest and cleanup reconciliation (rootful "webtest")
 #
 # The role records secrets, managed files and registry logins in a
@@ -629,6 +650,20 @@
     success_msg: >-
       state "absent" removed all manifest-recorded resources and kept the
       persistent data.
+
+
+- name: "Molecule | Verify | quadlet | Check the administrator's unit file survived the sweeps"
+  ansible.builtin.stat:
+    path: "/etc/containers/systemd/admin-own-decoy.container"
+  register: __testing_quadlet_admin_decoy_stat
+  failed_when:
+    - not __testing_quadlet_admin_decoy_stat['stat']['exists']
+
+
+- name: "Molecule | Verify | quadlet | Remove the administrator-owned test file"
+  ansible.builtin.file:
+    path: "/etc/containers/systemd/admin-own-decoy.container"
+    state: "absent"
 
 
 ## Complete removal of the rootless application

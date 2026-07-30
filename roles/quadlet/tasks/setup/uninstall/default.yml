@@ -40,7 +40,7 @@
       ansible.builtin.command:
         argv: >-
           {{
-            [__quadlet_podman_grep_exec_path, '-l', '-s', '--', __quadlet_podman_file_marker]
+            [__quadlet_podman_grep_exec_path, '-l', '-s', '-x', '-F', '--', __quadlet_podman_file_marker]
             + (__quadlet_podman_find_result['files'] | ansible.builtin.map(attribute='path') | ansible.builtin.list)
           }}
       register: __quadlet_podman_owned_result

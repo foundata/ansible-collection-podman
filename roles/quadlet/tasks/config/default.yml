@@ -186,7 +186,7 @@
   ansible.builtin.command:
     argv: >-
       {{
-        [__quadlet_podman_grep_exec_path, '-l', '-s', '--', __quadlet_podman_file_marker]
+        [__quadlet_podman_grep_exec_path, '-l', '-s', '-x', '-F', '--', __quadlet_podman_file_marker]
         + __quadlet_podman_stale_candidates
       }}
   register: __quadlet_podman_stale_result
