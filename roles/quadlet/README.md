@@ -557,7 +557,7 @@ the `Container` section, e.g.
 `Secret: "zammad_db_password,type=env,target=POSTGRES_PASSWORD"`.
 
 The role records the names of the secrets it created in a
-per-application manifest next to the unit files: secrets renamed or
+per-application manifest (root-owned, below `/var/lib/ansible-podman-quadlet/`): secrets renamed or
 removed from this list get removed again on the next run, and
 `quadlet_podman_state: "absent"` removes all of the application's
 secrets even when the current list is empty or different.
@@ -634,8 +634,9 @@ in the scope selected by `quadlet_podman_user`. Needed for images
 from private registries; the credentials are also used by the
 automatic image updates (`AutoUpdate=registry`).
 
-The role records its logins in a per-application manifest next to
-the unit files: registries removed from this list are logged out
+The role records its logins in a per-application manifest
+(root-owned, below `/var/lib/ansible-podman-quadlet/`): registries
+removed from this list are logged out
 again on the next run, and `quadlet_podman_state: "absent"` logs out
 of all recorded registries, so no credentials linger after removal.
 Note that the authentication file is shared per scope (one per
@@ -789,7 +790,7 @@ container only picks up a changed environment file when it is
 restarted).
 
 The role records the paths of the files it created in a
-per-application manifest next to the unit files: files renamed or
+per-application manifest (root-owned, below `/var/lib/ansible-podman-quadlet/`): files renamed or
 removed from this list get removed again on the next run, and
 `quadlet_podman_state: "absent"` removes all of the application's
 managed files even when the current list is empty or different.

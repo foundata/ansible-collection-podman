@@ -62,6 +62,13 @@
     quadlet_podman_state: "present"
     quadlet_podman_service_state: "enabled"
     quadlet_podman_user: "containerapp"
+    # A managed file so the rootless application gets a manifest: the verify
+    # stage checks the manifest is root-owned outside the account's writable
+    # tree (the recorded paths get removed as root on later runs).
+    quadlet_podman_files:
+      - dest: "/var/lib/podman/containerapp/usertest.env"
+        content: |
+          USERTEST_GREETING=hello
     quadlet_podman_units:
       - name: "usertest"
         type: "container"

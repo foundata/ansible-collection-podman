@@ -151,7 +151,19 @@ __quadlet_podman_file_marker: "# Managed by Ansible (foundata.podman.quadlet): a
 # manifest is the ownership record that lets renamed or de-listed resources be
 # cleaned up on the next run and lets state "absent" remove the application
 # completely even when the current lists differ from the deployed state.
-__quadlet_podman_manifest_file_path: "{{ __quadlet_podman_unit_dir_path }}/.{{ quadlet_podman_app }}.ansible-manifest"
+#
+# The manifests live in a root-owned directory (one subdirectory per scope),
+# deliberately OUTSIDE the rootless user's writable tree: the recorded file
+# paths get removed with root privileges later, so a manifest the service
+# account could edit would let it delete arbitrary files as root.
+__quadlet_podman_manifest_dir_path: >-
+  {{
+    '/var/lib/ansible-podman-quadlet/'
+    ~ (('user-' ~ quadlet_podman_user)
+       if (__quadlet_podman_rootless | ansible.builtin.bool)
+       else 'system')
+  }}
+__quadlet_podman_manifest_file_path: "{{ __quadlet_podman_manifest_dir_path }}/{{ quadlet_podman_app }}.ansible-manifest"
 
 
 # Currently declared resources of the application (entries with state

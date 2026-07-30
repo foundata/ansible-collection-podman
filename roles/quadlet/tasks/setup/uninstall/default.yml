@@ -211,10 +211,9 @@
     # registries are actually safe to log out of.
     - name: "Setup | Uninstall | Find the manifests of the other applications in this scope"
       ansible.builtin.find:
-        paths: "{{ __quadlet_podman_unit_dir_path }}"
+        paths: "{{ __quadlet_podman_manifest_dir_path }}"
         patterns:
-          - ".*.ansible-manifest"
-        hidden: true
+          - "*.ansible-manifest"
         file_type: "file"
       register: __quadlet_podman_manifest_find
 

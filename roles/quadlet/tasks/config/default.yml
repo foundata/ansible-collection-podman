@@ -332,10 +332,9 @@
 # actually safe to log out of.
 - name: "Config | Default | Find the manifests of the other applications in this scope"
   ansible.builtin.find:
-    paths: "{{ __quadlet_podman_unit_dir_path }}"
+    paths: "{{ __quadlet_podman_manifest_dir_path }}"
     patterns:
-      - ".*.ansible-manifest"
-    hidden: true
+      - "*.ansible-manifest"
     file_type: "file"
   register: __quadlet_podman_manifest_find
 
@@ -399,15 +398,31 @@
 ### Manifest: record the application's current resources
 
 # Written last so it only records what the run above actually ensured.
+# Owned by root on purpose (also in the user scope): the recorded file paths
+# get removed with root privileges later, so the service account must not be
+# able to modify them (see vars/main.yml).
+- name: "Config | Default | Ensure the manifest directory of this scope exists"
+  ansible.builtin.file:
+    path: "{{ __quadlet_podman_manifest_dir_path }}"
+    state: "directory"
+    owner: "root"
+    group: "root"
+    mode: "u=rwx,g=,o=" # 0700
+  when: >-
+    ((__quadlet_podman_secret_names_declared | ansible.builtin.length) > 0)
+    or ((__quadlet_podman_file_dests_declared | ansible.builtin.length) > 0)
+    or ((__quadlet_podman_registries_declared | ansible.builtin.length) > 0)
+
+
 - name: "Config | Default | Record the application's resources in the manifest"
   ansible.builtin.copy:
     content: |
       {{ __quadlet_podman_file_marker }}
       {{ __quadlet_podman_manifest_data | ansible.builtin.to_nice_yaml(indent=2) }}
     dest: "{{ __quadlet_podman_manifest_file_path }}"
-    owner: "{{ __quadlet_podman_file_owner }}"
-    group: "{{ __quadlet_podman_file_group }}"
-    mode: "{{ __quadlet_podman_managed_file_default_mode }}"
+    owner: "root"
+    group: "root"
+    mode: "u=rw,g=,o=" # 0600
   vars:
     __quadlet_podman_manifest_data:
       files: "{{ __quadlet_podman_file_dests_declared | ansible.builtin.sort }}"

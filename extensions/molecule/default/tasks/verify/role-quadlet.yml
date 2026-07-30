@@ -124,6 +124,31 @@
     quiet: true
 
 
+# The manifest's file paths get removed with root privileges on later runs,
+# so the rootless account must not be able to edit it: root-owned, not
+# group/world-writable and outside the account's writable tree. A user-owned
+# manifest would let the service account have arbitrary paths (e.g.
+# /etc/shadow) deleted as root.
+- name: "Molecule | Verify | quadlet | Get information about the rootless manifest"
+  ansible.builtin.stat:
+    path: "/var/lib/ansible-podman-quadlet/user-containerapp/usertest.ansible-manifest"
+  register: __testing_quadlet_usertest_manifest_stat
+
+
+- name: "Molecule | Verify | quadlet | Check the rootless manifest is out of the account's reach"
+  ansible.builtin.assert:
+    that:
+      - __testing_quadlet_usertest_manifest_stat['stat']['exists']
+      - __testing_quadlet_usertest_manifest_stat['stat']['pw_name'] == 'root'
+      - __testing_quadlet_usertest_manifest_stat['stat']['gr_name'] == 'root'
+      - __testing_quadlet_usertest_manifest_stat['stat']['mode'] == '0600'
+    fail_msg: >-
+      The rootless manifest is missing or writable by the service account;
+      its recorded paths get removed as root, so this would allow arbitrary
+      file deletion with root privileges.
+    success_msg: "The rootless manifest is root-owned and out of the account's reach."
+
+
 ## Application manifest and cleanup reconciliation (rootful "webtest")
 #
 # The role records secrets, managed files and registry logins in a
@@ -136,7 +161,7 @@
 
 - name: "Molecule | Verify | quadlet | Read the webtest application manifest"
   ansible.builtin.slurp:
-    src: "/etc/containers/systemd/.webtest.ansible-manifest"
+    src: "/var/lib/ansible-podman-quadlet/system/webtest.ansible-manifest"
   register: __testing_quadlet_manifest_slurp
 
 
@@ -223,7 +248,7 @@
 
 - name: "Molecule | Verify | quadlet | Reap: read the manifest after adding"
   ansible.builtin.slurp:
-    src: "/etc/containers/systemd/.webtest.ansible-manifest"
+    src: "/var/lib/ansible-podman-quadlet/system/webtest.ansible-manifest"
   register: __testing_quadlet_reap_added_manifest
 
 
@@ -362,7 +387,7 @@
 
 - name: "Molecule | Verify | quadlet | Reap: read the manifest after de-listing"
   ansible.builtin.slurp:
-    src: "/etc/containers/systemd/.webtest.ansible-manifest"
+    src: "/var/lib/ansible-podman-quadlet/system/webtest.ansible-manifest"
   register: __testing_quadlet_reap_removed_manifest
 
 
@@ -414,7 +439,7 @@
         - registry-shared.molecule.invalid
       secrets:
         - webtest_secret
-    dest: "/etc/containers/systemd/.webtest.ansible-manifest"
+    dest: "/var/lib/ansible-podman-quadlet/system/webtest.ansible-manifest"
     owner: "root"
     group: "root"
     mode: "u=rw,g=r,o="
@@ -428,7 +453,7 @@
       registries:
         - registry-shared.molecule.invalid
       secrets: []
-    dest: "/etc/containers/systemd/.otherapp.ansible-manifest"
+    dest: "/var/lib/ansible-podman-quadlet/system/otherapp.ansible-manifest"
     owner: "root"
     group: "root"
     mode: "u=rw,g=r,o="
@@ -494,7 +519,7 @@
 
 - name: "Molecule | Verify | quadlet | Logout: read the manifest"
   ansible.builtin.slurp:
-    src: "/etc/containers/systemd/.webtest.ansible-manifest"
+    src: "/var/lib/ansible-podman-quadlet/system/webtest.ansible-manifest"
   register: __testing_quadlet_logout_manifest
 
 
@@ -531,7 +556,7 @@
     path: "{{ item }}"
     state: "absent"
   loop:
-    - "/etc/containers/systemd/.otherapp.ansible-manifest"
+    - "/var/lib/ansible-podman-quadlet/system/otherapp.ansible-manifest"
     - "/etc/containers/auth.json"
 
 
@@ -581,7 +606,7 @@
   loop:
     - "/etc/containers/systemd/webtest.container"
     - "/etc/containers/systemd/webtest-data.volume"
-    - "/etc/containers/systemd/.webtest.ansible-manifest"
+    - "/var/lib/ansible-podman-quadlet/system/webtest.ansible-manifest"
     - "/var/lib/webtest/app.env"
     - "/var/lib/webtest"
 
@@ -623,7 +648,9 @@
   register: __testing_quadlet_absent_rootless_stat
   loop:
     - "/var/lib/podman/containerapp/.config/containers/systemd/usertest.container"
-    - "/var/lib/podman/containerapp/.config/containers/systemd/.usertest.ansible-manifest"
+    - "/var/lib/ansible-podman-quadlet/user-containerapp/usertest.ansible-manifest"
+    # manifest-recorded managed file (declared lists are empty here)
+    - "/var/lib/podman/containerapp/usertest.env"
 
 
 - name: "Molecule | Verify | quadlet | Absent: check the rootless application is fully removed"
@@ -631,9 +658,10 @@
     that:
       - not __testing_quadlet_absent_rootless_stat['results'][0]['stat']['exists']
       - not __testing_quadlet_absent_rootless_stat['results'][1]['stat']['exists']
+      - not __testing_quadlet_absent_rootless_stat['results'][2]['stat']['exists']
     fail_msg: >-
-      state "absent" left rootless unit files or the manifest behind in the
-      user scope.
+      state "absent" left rootless unit files, the manifest or a
+      manifest-recorded file behind.
     success_msg: "state \"absent\" removed the rootless application."
 
 
