@@ -19,6 +19,10 @@
   vars:
     host_podman_state: "present"
     host_podman_service_state: "enabled"
+    # A string on purpose (as delivered by "-e var=true" command line
+    # extra-vars): the role has to coerce boolean arguments, not
+    # truthiness-evaluate them.
+    host_podman_auto_update: "true"
     host_podman_containers:
       containers:
         log_driver: "journald"

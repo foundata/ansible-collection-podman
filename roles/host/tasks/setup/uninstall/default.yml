@@ -39,7 +39,7 @@
   vars:
     __host_podman_selinux_declared_paths: []
   when:
-    - host_podman_selinux_manage
+    - host_podman_selinux_manage | ansible.builtin.bool
     - ansible_facts['selinux']['status'] | ansible.builtin.default('') == 'enabled'
 
 

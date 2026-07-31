@@ -17,7 +17,7 @@
     state: "{{ 'started' if host_podman_service_state in ['enabled', 'running'] else 'stopped' if host_podman_service_state == 'disabled' }}"
     enabled: "{{ true if host_podman_service_state == 'enabled' else false if host_podman_service_state in ['disabled', 'running'] }}"
   when:
-    - host_podman_auto_update
+    - host_podman_auto_update | ansible.builtin.bool
     - host_podman_service_state != 'unmanaged'
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
 
@@ -28,7 +28,7 @@
     state: "stopped"
     enabled: false
   when:
-    - not host_podman_auto_update
+    - not (host_podman_auto_update | ansible.builtin.bool)
     - host_podman_service_state != 'unmanaged'
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
 
@@ -39,7 +39,7 @@
     state: "{{ 'started' if host_podman_service_state in ['enabled', 'running'] else 'stopped' if host_podman_service_state == 'disabled' }}"
     enabled: "{{ true if host_podman_service_state == 'enabled' else false if host_podman_service_state in ['disabled', 'running'] }}"
   when:
-    - host_podman_docker_compat
+    - host_podman_docker_compat | ansible.builtin.bool
     - host_podman_service_state != 'unmanaged'
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
 
@@ -50,6 +50,6 @@
     state: "stopped"
     enabled: false
   when:
-    - not host_podman_docker_compat
+    - not (host_podman_docker_compat | ansible.builtin.bool)
     - host_podman_service_state != 'unmanaged'
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'

@@ -25,7 +25,7 @@
     name: "{{ __host_podman_docker_compat_package }}"
     state: "{{ 'latest' if host_podman_autoupgrade else 'present' }}"
   when:
-    - host_podman_docker_compat
+    - host_podman_docker_compat | ansible.builtin.bool
 
 
 - name: "Setup | Install | Default | Remove the Docker compatibility package (host_podman_docker_compat is false)"
@@ -33,7 +33,7 @@
     name: "{{ __host_podman_docker_compat_package }}"
     state: "absent"
   when:
-    - not host_podman_docker_compat
+    - not (host_podman_docker_compat | ansible.builtin.bool)
 
 
 - name: "Setup | Install | Default | Remove unwanted files and directories (e.g., to prevent conflicts or resolve incompatibilities)"
