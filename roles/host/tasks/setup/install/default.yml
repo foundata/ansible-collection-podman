@@ -14,7 +14,7 @@
 - name: "Setup | Install | Default | Install or upgrade packages"
   ansible.builtin.package:
     name: "{{ __host_podman_packages_install }}"
-    state: "{{ 'latest' if host_podman_autoupgrade else 'present' }}"
+    state: "{{ 'latest' if (host_podman_autoupgrade | ansible.builtin.bool) else 'present' }}"
   when:
     - __host_podman_packages_install is ansible.builtin.defined
     - (__host_podman_packages_install | ansible.builtin.length) > 0
@@ -23,7 +23,7 @@
 - name: "Setup | Install | Default | Install or upgrade the Docker compatibility package"
   ansible.builtin.package:
     name: "{{ __host_podman_docker_compat_package }}"
-    state: "{{ 'latest' if host_podman_autoupgrade else 'present' }}"
+    state: "{{ 'latest' if (host_podman_autoupgrade | ansible.builtin.bool) else 'present' }}"
   when:
     - host_podman_docker_compat | ansible.builtin.bool
 
