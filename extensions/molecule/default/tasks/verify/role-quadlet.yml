@@ -700,6 +700,105 @@
     success_msg: "state \"absent\" removed the rootless application."
 
 
+## Root-side cleanup with a deleted service account
+#
+# Re-deploy the rootless application, then delete the account entirely: the
+# account-dependent removals (services, unit files, secrets, logins) are
+# skipped, but the root-owned manifest and the manifest-recorded files must
+# still be cleaned up by state "absent".
+
+- name: "Molecule | Verify | quadlet | Account gone: re-deploy the usertest application"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "usertest"
+    quadlet_podman_state: "present"
+    quadlet_podman_service_state: "enabled"
+    quadlet_podman_user: "containerapp"
+    quadlet_podman_files:
+      - dest: "/var/lib/podman/containerapp/usertest.env"
+        content: |
+          USERTEST_GREETING=hello
+    quadlet_podman_units:
+      - name: "usertest"
+        type: "container"
+        sections:
+          Unit:
+            Description: "Molecule usertest container (rootless)"
+          Container:
+            ContainerName: "usertest"
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "top"
+          Install:
+            WantedBy:
+              - "default.target"
+
+
+- name: "Molecule | Verify | quadlet | Account gone: stop the user services and delete the account"
+  ansible.builtin.shell:
+    cmd: |
+      set -u
+      loginctl disable-linger containerapp || true
+      loginctl terminate-user containerapp || true
+      sleep 2
+      pkill -9 -u containerapp || true
+      sleep 1
+      userdel --remove --force containerapp
+  args:
+    executable: "/bin/bash"
+  changed_when:
+    - true
+
+
+- name: "Molecule | Verify | quadlet | Account gone: run the role with state 'absent'"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "usertest"
+    quadlet_podman_state: "absent"
+    quadlet_podman_user: "containerapp"
+
+
+- name: "Molecule | Verify | quadlet | Account gone: check the root-owned manifest"
+  ansible.builtin.stat:
+    path: "/var/lib/ansible-podman-quadlet/user-containerapp/usertest.ansible-manifest"
+  register: __testing_quadlet_accountgone_manifest
+
+
+- name: "Molecule | Verify | quadlet | Account gone: assert the manifest was cleaned up without the account"
+  ansible.builtin.assert:
+    that:
+      - not __testing_quadlet_accountgone_manifest['stat']['exists']
+    fail_msg: >-
+      The root-owned manifest survived state "absent" although only the
+      service account is gone; the root-side cleanup must not depend on the
+      account.
+    success_msg: "The root-side cleanup removed the manifest without the account."
+
+
+- name: "Molecule | Verify | quadlet | Account gone: re-create the test account (later stages expect it)"
+  ansible.builtin.user:
+    name: "containerapp"
+    state: "present"
+    system: true
+    home: "/var/lib/podman/containerapp"
+    create_home: true
+    shell: "/bin/bash"
+    password: "!"
+
+
+# userdel --remove also dropped the account's subordinate ID assignments; the
+# host-absent checks later expect the converge-time ranges to survive.
+- name: "Molecule | Verify | quadlet | Account gone: restore the subordinate ID ranges of the account"
+  ansible.builtin.lineinfile:
+    path: "{{ item }}"
+    line: "containerapp:20000:20000"
+    state: "present"
+  loop:
+    - "/etc/subuid"
+    - "/etc/subgid"
+
+
 ## Complete removal of the host role (runs after the applications are gone:
 ## it removes the Podman packages and reverts the rootless enablement the
 ## applications depend on)

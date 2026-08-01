@@ -16,13 +16,40 @@
   ansible.builtin.debug:
     msg: >-
       The account '{{ quadlet_podman_user }}' (quadlet_podman_user) does not
-      exist (anymore); there is nothing to remove for it.
+      exist (anymore); the account-dependent removals (services, unit files,
+      secrets, registry logins) are skipped, the root-side cleanup (manifest,
+      manifest-recorded files) still runs.
   when:
     - __quadlet_podman_rootless | ansible.builtin.bool
     - not (__quadlet_podman_user_exists | ansible.builtin.bool)
 
 
-- name: "Setup | Uninstall | Remove the application"
+- name: "Setup | Uninstall | Read the application manifest (previously created resources)"
+  ansible.builtin.slurp:
+    src: "{{ __quadlet_podman_manifest_file_path }}"
+  register: __quadlet_podman_manifest_slurp
+  failed_when:
+    # tolerate a missing manifest (pre-manifest deployment or removed by
+    # hand; the currently declared lists still get cleaned up below)
+    - __quadlet_podman_manifest_slurp['msg'] is ansible.builtin.defined
+    - "'file not found' not in (__quadlet_podman_manifest_slurp['msg'] | ansible.builtin.lower)"
+
+
+- name: "Setup | Uninstall | Determine the previously created resources of the application"
+  ansible.builtin.set_fact:
+    __quadlet_podman_manifest_old: >-
+      {{
+        (__quadlet_podman_manifest_slurp['content'] | ansible.builtin.default('')
+         | ansible.builtin.b64decode | ansible.builtin.from_yaml)
+        | ansible.builtin.default({}, true)
+      }}
+
+
+# Account-dependent removals: everything below needs the service account (its
+# systemd user instance, its Podman storage or its home directory) and is
+# skipped when the account is gone. The root-side cleanup after this block
+# runs either way.
+- name: "Setup | Uninstall | Remove the application (account-dependent parts)"
   when:
     - __quadlet_podman_user_exists | ansible.builtin.bool
   block:
@@ -146,27 +173,6 @@
       register: __quadlet_podman_exec_stat
 
 
-    - name: "Setup | Uninstall | Read the application manifest (previously created resources)"
-      ansible.builtin.slurp:
-        src: "{{ __quadlet_podman_manifest_file_path }}"
-      register: __quadlet_podman_manifest_slurp
-      failed_when:
-        # tolerate a missing manifest (pre-manifest deployment or removed by
-        # hand; the currently declared lists still get cleaned up below)
-        - __quadlet_podman_manifest_slurp['msg'] is ansible.builtin.defined
-        - "'file not found' not in (__quadlet_podman_manifest_slurp['msg'] | ansible.builtin.lower)"
-
-
-    - name: "Setup | Uninstall | Determine the previously created resources of the application"
-      ansible.builtin.set_fact:
-        __quadlet_podman_manifest_old: >-
-          {{
-            (__quadlet_podman_manifest_slurp['content'] | ansible.builtin.default('')
-             | ansible.builtin.b64decode | ansible.builtin.from_yaml)
-            | ansible.builtin.default({}, true)
-          }}
-
-
     # Only secret names are handled here, no secret values are involved.
     - name: "Setup | Uninstall | Remove the Podman secrets of the application"
       containers.podman.podman_secret:
@@ -187,21 +193,6 @@
         }}
       loop_control:
         loop_var: "__quadlet_podman_secret_name"
-
-
-    - name: "Setup | Uninstall | Remove the managed files of the application"
-      ansible.builtin.file:
-        path: "{{ __quadlet_podman_file_dest }}"
-        state: "absent"
-      loop: >-
-        {{
-          ((__quadlet_podman_manifest_old['files'] | ansible.builtin.default([]))
-           + (quadlet_podman_files | ansible.builtin.map(attribute='dest') | ansible.builtin.list))
-          | ansible.builtin.unique
-          | ansible.builtin.list
-        }}
-      loop_control:
-        loop_var: "__quadlet_podman_file_dest"
 
 
     # All applications of a scope share one authfile, so a logout for this
@@ -277,10 +268,25 @@
         loop_var: "__quadlet_podman_registry"
 
 
-    - name: "Setup | Uninstall | Remove the application manifest"
-      ansible.builtin.file:
-        path: "{{ __quadlet_podman_manifest_file_path }}"
-        state: "absent"
+- name: "Setup | Uninstall | Remove the managed files of the application"
+  ansible.builtin.file:
+    path: "{{ __quadlet_podman_file_dest }}"
+    state: "absent"
+  loop: >-
+    {{
+      ((__quadlet_podman_manifest_old['files'] | ansible.builtin.default([]))
+       + (quadlet_podman_files | ansible.builtin.map(attribute='dest') | ansible.builtin.list))
+      | ansible.builtin.unique
+      | ansible.builtin.list
+    }}
+  loop_control:
+    loop_var: "__quadlet_podman_file_dest"
+
+
+- name: "Setup | Uninstall | Remove the application manifest"
+  ansible.builtin.file:
+    path: "{{ __quadlet_podman_manifest_file_path }}"
+    state: "absent"
 
 
 - name: "Setup | Uninstall | Remove packages"
