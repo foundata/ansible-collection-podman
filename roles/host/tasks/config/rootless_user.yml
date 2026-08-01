@@ -114,15 +114,13 @@
       ansible.builtin.set_fact:
         __host_podman_ru_subuid_line_count: >-
           {{
-            __host_podman_ru_subid_content[0]
-            | ansible.builtin.split('\n')
+            __host_podman_ru_subid_content[0].splitlines()
             | ansible.builtin.select('match', '^' ~ (__host_podman_ru['name'] | ansible.builtin.regex_escape) ~ ':')
             | ansible.builtin.length
           }}
         __host_podman_ru_subgid_line_count: >-
           {{
-            __host_podman_ru_subid_content[1]
-            | ansible.builtin.split('\n')
+            __host_podman_ru_subid_content[1].splitlines()
             | ansible.builtin.select('match', '^' ~ (__host_podman_ru['name'] | ansible.builtin.regex_escape) ~ ':')
             | ansible.builtin.length
           }}
@@ -131,7 +129,7 @@
         # __host_podman_subid_floor as the lower bound.
         __host_podman_ru_subid_next_start: >-
           {%- set __ns = namespace(maxend=__host_podman_subid_floor) -%}
-          {%- for __line in (__host_podman_ru_subid_content[0] ~ '\n' ~ __host_podman_ru_subid_content[1]).split('\n') -%}
+          {%- for __line in (__host_podman_ru_subid_content[0].splitlines() + __host_podman_ru_subid_content[1].splitlines()) -%}
           {%-   set __parts = __line.split(':') -%}
           {%-   if (__parts | ansible.builtin.length) == 3
                    and (__parts[1] is ansible.builtin.match('^[0-9]+$'))
@@ -184,7 +182,7 @@
           {%-     set __value = __host_podman_ru[__pair[0]] | ansible.builtin.string -%}
           {%-     set __start = (__value.split(':')[0] | ansible.builtin.int) -%}
           {%-     set __end = __start + (__value.split(':')[1] | ansible.builtin.int) -%}
-          {%-     for __line in __host_podman_ru_subid_content[__pair[1]].split('\n') -%}
+          {%-     for __line in __host_podman_ru_subid_content[__pair[1]].splitlines() -%}
           {%-       set __parts = __line.split(':') -%}
           {%-       if ((__parts | ansible.builtin.length) == 3)
                        and (__parts[0] != __host_podman_ru['name'])
