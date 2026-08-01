@@ -929,3 +929,115 @@
     path: "/etc/subuid"
     line: "overlapvictim:60000:1000"
     state: "absent"
+
+
+## SELinux equivalence-rule ownership (EL platforms)
+#
+# The role must only remove equivalence rules it created itself: a declared
+# path whose rule already existed (an administrator's rule) stays unrecorded
+# and must survive its de-listing, while a role-created rule is reaped when
+# de-listed (regression: broken manifest parsing once made every reap a
+# silent no-op, and every declared path was recorded regardless of origin).
+
+- name: "Molecule | Verify | host | Gather SELinux facts"
+  ansible.builtin.setup:
+    gather_subset:
+      - "selinux"
+
+
+- name: "Molecule | Verify | host | SELinux equivalence-rule ownership"
+  when:
+    - (ansible_facts['selinux']['status'] | ansible.builtin.default('')) == 'enabled'
+  block:
+
+    - name: "Molecule | Verify | host | SELinux: create the test directories (restorecon needs existing paths)"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: "directory"
+        owner: "root"
+        group: "root"
+        mode: "u=rwx,g=rx,o=rx"
+      loop:
+        - "/var/lib/molecule-foreign-store"
+        - "/var/lib/molecule-own-store"
+
+
+    - name: "Molecule | Verify | host | SELinux: plant an administrator-owned equivalence rule"
+      community.general.sefcontext:
+        target: "/var/lib/molecule-foreign-store"
+        substitute: "/var/lib/containers"
+        state: "present"
+        reload: true
+
+    - name: "Molecule | Verify | host | SELinux: run the role with the foreign path and a new path declared"
+      ansible.builtin.include_role:
+        name: "foundata.podman.host"
+      vars:
+        host_podman_rootless_users:
+          - name: "containerapp"
+            subuid: "20000:20000"
+            subgid: "20000:20000"
+        host_podman_selinux_label_paths:
+          - "/var/lib/podman"
+          - "/var/lib/molecule-foreign-store"
+          - "/var/lib/molecule-own-store"
+
+    - name: "Molecule | Verify | host | SELinux: read the manifest"
+      ansible.builtin.slurp:
+        src: "/etc/selinux/ansible-foundata-podman-host-equivalences"
+      register: __testing_host_selinux_manifest
+
+    - name: "Molecule | Verify | host | SELinux: assert only role-created rules are recorded"
+      ansible.builtin.assert:
+        that:
+          - "'/var/lib/molecule-own-store' in __testing_host_selinux_manifest_content"
+          - "'/var/lib/molecule-foreign-store' not in __testing_host_selinux_manifest_content"
+        fail_msg: >-
+          The manifest records a pre-existing (administrator-owned) rule as
+          role-created; de-listing would remove a foreign rule.
+        success_msg: "Only role-created equivalence rules are recorded."
+      vars:
+        __testing_host_selinux_manifest_content: "{{ __testing_host_selinux_manifest['content'] | ansible.builtin.b64decode }}"
+
+    - name: "Molecule | Verify | host | SELinux: run the role again with both test paths de-listed"
+      ansible.builtin.include_role:
+        name: "foundata.podman.host"
+      vars:
+        host_podman_rootless_users:
+          - name: "containerapp"
+            subuid: "20000:20000"
+            subgid: "20000:20000"
+        host_podman_selinux_label_paths:
+          - "/var/lib/podman"
+
+    - name: "Molecule | Verify | host | SELinux: list the local file context customizations"
+      ansible.builtin.command:
+        argv: ["semanage", "fcontext", "--list", "-C"]
+      register: __testing_host_selinux_list
+      changed_when:
+        - false
+
+    - name: "Molecule | Verify | host | SELinux: assert the foreign rule survived and the role-created rule was reaped"
+      ansible.builtin.assert:
+        that:
+          - "'/var/lib/molecule-foreign-store' in __testing_host_selinux_list['stdout']"
+          - "'/var/lib/molecule-own-store' not in __testing_host_selinux_list['stdout']"
+        fail_msg: >-
+          De-listing removed an administrator-owned rule or left a
+          role-created rule behind.
+        success_msg: "The foreign rule survived, the role-created rule was reaped."
+
+    - name: "Molecule | Verify | host | SELinux: remove the administrator-owned test rule again"
+      community.general.sefcontext:
+        target: "/var/lib/molecule-foreign-store"
+        substitute: "/var/lib/containers"
+        state: "absent"
+        reload: true
+
+    - name: "Molecule | Verify | host | SELinux: remove the test directories again"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: "absent"
+      loop:
+        - "/var/lib/molecule-foreign-store"
+        - "/var/lib/molecule-own-store"
