@@ -74,6 +74,39 @@
     quiet: true
 
 
+## Check mode on the deployed application
+#
+# A --check run against the deployed application must succeed (regression:
+# the read-only Podman version probe was skipped in check mode and the next
+# task failed dereferencing the missing stdout) and must not change anything.
+# Only the app identity is passed, so a REAL run with these variables would
+# reap the deployed units; the surviving unit file below proves check mode
+# did not.
+
+- name: "Molecule | Verify | quadlet | Run the role in check mode on the deployed application"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+    apply:
+      check_mode: true
+  vars:
+    quadlet_podman_app: "webtest"
+    quadlet_podman_state: "present"
+
+
+- name: "Molecule | Verify | quadlet | Check mode: get information about the webtest unit file"
+  ansible.builtin.stat:
+    path: "/etc/containers/systemd/webtest.container"
+  register: __testing_quadlet_checkmode_unit_stat
+
+
+- name: "Molecule | Verify | quadlet | Check mode: assert nothing was changed"
+  ansible.builtin.assert:
+    that:
+      - __testing_quadlet_checkmode_unit_stat['stat']['exists']
+    fail_msg: "The check-mode run removed the deployed webtest unit file."
+    success_msg: "The check-mode run succeeded without changing the deployed application."
+
+
 ### Rootless application ("usertest", account "containerapp")
 
 - name: "Molecule | Verify | quadlet | Read the usertest container unit file (rootless)"

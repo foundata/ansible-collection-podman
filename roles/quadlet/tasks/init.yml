@@ -323,6 +323,9 @@
           - "--version"
       register: __quadlet_podman_version_result
       changed_when: false
+      # The probe is read-only; run it under "--check" too, otherwise it is
+      # skipped and the next task fails on the missing stdout.
+      check_mode: false
 
 
     - name: "Init | Store the installed Podman version as fact"

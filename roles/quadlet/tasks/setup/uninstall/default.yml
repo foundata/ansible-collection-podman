@@ -72,6 +72,9 @@
           }}
       register: __quadlet_podman_owned_result
       changed_when: false
+      # read-only probe; run it under "--check" too so check mode reports the
+      # removals instead of silently skipping them
+      check_mode: false
       failed_when:
         - __quadlet_podman_owned_result['rc'] not in [0, 1, 2]
       when:
