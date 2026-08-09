@@ -47,6 +47,8 @@
   loop:
     - ".config"
     - ".config/containers"
+    - ".config/systemd"
+    - ".config/systemd/user"
   loop_control:
     label: "{{ __quadlet_podman_user_home }}/{{ item }}"
 
@@ -171,6 +173,31 @@
     - "quadlet_podman: restart application services"
 
 
+# Plain units are restarted on change via their own handler (not the
+# application services one): e.g. a changed OnCalendar only takes effect
+# after the timer is restarted, while unrelated application services need no
+# restart for it.
+- name: "Config | Default | Create the plain systemd unit files of the application"
+  ansible.builtin.template:
+    src: "systemd_unit.j2"
+    dest: "{{ __quadlet_podman_systemd_unit_dir_path }}/{{ __quadlet_podman_systemd_unit_item['name'] }}"
+    owner: "{{ __quadlet_podman_file_owner }}"
+    group: "{{ __quadlet_podman_file_group }}"
+    mode: "{{ __quadlet_podman_unit_file_mode }}"
+  vars:
+    # Pass (and/or adjust) variables needed for the template
+    tpl_unit: "{{ __quadlet_podman_systemd_unit_item }}"
+    tpl_service_map: "{{ __quadlet_podman_service_map }}"
+    tpl_file_marker: "{{ __quadlet_podman_file_marker }}"
+  loop: "{{ __quadlet_podman_systemd_units_effective }}"
+  loop_control:
+    loop_var: "__quadlet_podman_systemd_unit_item"
+    label: "{{ __quadlet_podman_systemd_unit_item['name'] }}"
+  notify:
+    - "quadlet_podman: systemd daemon-reload"
+    - "quadlet_podman: restart application systemd units"
+
+
 ### Cleanup: reap this application's units that are no longer listed
 
 - name: "Config | Default | Find Quadlet unit files in the unit directory"
@@ -283,6 +310,130 @@
     path: "{{ __quadlet_podman_stale_path }}"
     state: "absent"
   loop: "{{ __quadlet_podman_stale_result['stdout_lines'] | ansible.builtin.default([]) }}"
+  loop_control:
+    loop_var: "__quadlet_podman_stale_path"
+    label: "{{ __quadlet_podman_stale_path }}"
+  notify:
+    - "quadlet_podman: systemd daemon-reload"
+
+
+### Cleanup: reap this application's plain systemd units no longer listed
+### (marker-identified like the Quadlet files; other files in the shared
+### systemd unit directory are never touched)
+
+- name: "Config | Default | Find plain systemd unit files in the systemd unit directory"
+  ansible.builtin.find:
+    paths:
+      - "{{ __quadlet_podman_systemd_unit_dir_path }}"
+    patterns: "{{ __quadlet_podman_systemd_unit_suffixes | ansible.builtin.map('ansible.builtin.regex_replace', '^', '*.') | ansible.builtin.list }}"
+    file_type: "file"
+  register: __quadlet_podman_systemd_find_result
+
+
+- name: "Config | Default | Determine stale plain systemd unit files of the application"
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [__quadlet_podman_grep_exec_path, '-l', '-s', '-x', '-F', '--', __quadlet_podman_file_marker]
+        + __quadlet_podman_systemd_stale_candidates
+      }}
+  register: __quadlet_podman_systemd_stale_result
+  changed_when: false
+  # read-only probe; run it under "--check" too so check mode reports the
+  # stale-unit removals instead of silently skipping them
+  check_mode: false
+  failed_when:
+    - __quadlet_podman_systemd_stale_result['rc'] not in [0, 1, 2]
+  vars:
+    __quadlet_podman_systemd_stale_candidates: >-
+      {{
+        __quadlet_podman_systemd_find_result['files']
+        | ansible.builtin.map(attribute='path')
+        | ansible.builtin.reject('ansible.builtin.in',
+            __quadlet_podman_systemd_units_effective
+            | ansible.builtin.map(attribute='name')
+            | ansible.builtin.map('ansible.builtin.regex_replace', '^', __quadlet_podman_systemd_unit_dir_path ~ '/')
+            | ansible.builtin.list
+          )
+        | ansible.builtin.list
+      }}
+  when:
+    - (__quadlet_podman_systemd_stale_candidates | ansible.builtin.length) > 0
+
+
+- name: "Config | Default | Stop the stale plain systemd units"
+  ansible.builtin.systemd_service:
+    name: "{{ __quadlet_podman_stale_path | ansible.builtin.basename }}"
+    state: "stopped"
+    scope: "{{ __quadlet_podman_systemd_scope }}"
+  become: true
+  become_user: "{{ __quadlet_podman_become_user }}"
+  environment: "{{ __quadlet_podman_task_environment }}"
+  # tolerate units that are not loaded (unit was never started)
+  failed_when: false
+  when:
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+  loop: "{{ __quadlet_podman_systemd_stale_result['stdout_lines'] | ansible.builtin.default([]) }}"
+  loop_control:
+    loop_var: "__quadlet_podman_stale_path"
+    label: "{{ __quadlet_podman_stale_path }}"
+
+
+# Disabling removes the enablement symlinks (e.g. in timers.target.wants/)
+# that would otherwise dangle after the unit file removal below. The command
+# module is used intentionally: ansible.builtin.systemd_service fails on
+# units without an Install section, this cleanup must tolerate them.
+- name: "Config | Default | Disable the stale plain systemd units"
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [__quadlet_podman_systemctl_exec_path]
+        + (['--user'] if (__quadlet_podman_rootless | ansible.builtin.bool) else [])
+        + ['disable', __quadlet_podman_stale_path | ansible.builtin.basename]
+      }}
+  become: true
+  become_user: "{{ __quadlet_podman_become_user }}"
+  environment: "{{ __quadlet_podman_task_environment }}"
+  changed_when: false
+  # tolerate units systemd does not know or that carry no Install section
+  failed_when: false
+  when:
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+  loop: "{{ __quadlet_podman_systemd_stale_result['stdout_lines'] | ansible.builtin.default([]) }}"
+  loop_control:
+    loop_var: "__quadlet_podman_stale_path"
+    label: "{{ __quadlet_podman_stale_path }}"
+
+
+# Clear a possible "failed" state so the unit does not stay pinned in systemd
+# after its file is removed and the daemon reloaded.
+- name: "Config | Default | Clear the failed state of the stale plain systemd units"
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [__quadlet_podman_systemctl_exec_path]
+        + (['--user'] if (__quadlet_podman_rootless | ansible.builtin.bool) else [])
+        + ['reset-failed', __quadlet_podman_stale_path | ansible.builtin.basename]
+      }}
+  become: true
+  become_user: "{{ __quadlet_podman_become_user }}"
+  environment: "{{ __quadlet_podman_task_environment }}"
+  changed_when: false
+  # tolerate units systemd does not know (unit was never started)
+  failed_when: false
+  when:
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+  loop: "{{ __quadlet_podman_systemd_stale_result['stdout_lines'] | ansible.builtin.default([]) }}"
+  loop_control:
+    loop_var: "__quadlet_podman_stale_path"
+    label: "{{ __quadlet_podman_stale_path }}"
+
+
+- name: "Config | Default | Remove the stale plain systemd unit files of the application"
+  ansible.builtin.file:
+    path: "{{ __quadlet_podman_stale_path }}"
+    state: "absent"
+  loop: "{{ __quadlet_podman_systemd_stale_result['stdout_lines'] | ansible.builtin.default([]) }}"
   loop_control:
     loop_var: "__quadlet_podman_stale_path"
     label: "{{ __quadlet_podman_stale_path }}"

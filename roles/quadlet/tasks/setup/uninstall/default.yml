@@ -3,9 +3,9 @@
 ---
 
 # Removes the application: its services get stopped, the Quadlet unit files
-# (identified by the application marker, so this works even when
-# quadlet_podman_units changed since deployment), secrets and managed files
-# get removed and its registry logins are logged out again. Secrets, files
+# and plain systemd units (identified by the application marker, so this works
+# even when the unit lists changed since deployment), secrets and managed
+# files get removed and its registry logins are logged out again. Secrets, files
 # and logins are taken from the union of the application manifest (see
 # vars/main.yml) and the currently declared lists, so resources renamed since
 # deployment are removed as well. Host directories
@@ -53,6 +53,120 @@
   when:
     - __quadlet_podman_user_exists | ansible.builtin.bool
   block:
+
+    ### Plain systemd units first: timers get stopped before the services
+    ### they would trigger. Marker-identified like the Quadlet files, so this
+    ### works even when quadlet_podman_systemd_units changed since deployment.
+
+    - name: "Setup | Uninstall | Find plain systemd unit files in the systemd unit directory"
+      ansible.builtin.find:
+        paths:
+          - "{{ __quadlet_podman_systemd_unit_dir_path }}"
+        patterns: "{{ __quadlet_podman_systemd_unit_suffixes | ansible.builtin.map('ansible.builtin.regex_replace', '^', '*.') | ansible.builtin.list }}"
+        file_type: "file"
+      register: __quadlet_podman_systemd_find_result
+
+
+    - name: "Setup | Uninstall | Determine the plain systemd unit files of the application"
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [__quadlet_podman_grep_exec_path, '-l', '-s', '-x', '-F', '--', __quadlet_podman_file_marker]
+            + (__quadlet_podman_systemd_find_result['files'] | ansible.builtin.map(attribute='path') | ansible.builtin.list)
+          }}
+      register: __quadlet_podman_systemd_owned_result
+      changed_when: false
+      # read-only probe; run it under "--check" too so check mode reports the
+      # removals instead of silently skipping them
+      check_mode: false
+      failed_when:
+        - __quadlet_podman_systemd_owned_result['rc'] not in [0, 1, 2]
+      when:
+        - (__quadlet_podman_systemd_find_result['files'] | ansible.builtin.length) > 0
+
+
+    - name: "Setup | Uninstall | Stop the plain systemd units of the application"
+      ansible.builtin.systemd_service:
+        name: "{{ __quadlet_podman_owned_path | ansible.builtin.basename }}"
+        state: "stopped"
+        scope: "{{ __quadlet_podman_systemd_scope }}"
+      become: true
+      become_user: "{{ __quadlet_podman_become_user }}"
+      environment: "{{ __quadlet_podman_task_environment }}"
+      # tolerate units that are not loaded (unit was never started)
+      failed_when: false
+      when:
+        - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+      loop: "{{ __quadlet_podman_systemd_owned_result['stdout_lines'] | ansible.builtin.default([]) }}"
+      loop_control:
+        loop_var: "__quadlet_podman_owned_path"
+        label: "{{ __quadlet_podman_owned_path }}"
+
+
+    # Disabling removes the enablement symlinks (e.g. in timers.target.wants/)
+    # that would otherwise dangle after the unit file removal below. The
+    # command module is used intentionally: ansible.builtin.systemd_service
+    # fails on units without an Install section, this cleanup must tolerate
+    # them.
+    - name: "Setup | Uninstall | Disable the plain systemd units of the application"
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [__quadlet_podman_systemctl_exec_path]
+            + (['--user'] if (__quadlet_podman_rootless | ansible.builtin.bool) else [])
+            + ['disable', __quadlet_podman_owned_path | ansible.builtin.basename]
+          }}
+      become: true
+      become_user: "{{ __quadlet_podman_become_user }}"
+      environment: "{{ __quadlet_podman_task_environment }}"
+      changed_when: false
+      # tolerate units systemd does not know or without an Install section
+      failed_when: false
+      when:
+        - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+      loop: "{{ __quadlet_podman_systemd_owned_result['stdout_lines'] | ansible.builtin.default([]) }}"
+      loop_control:
+        loop_var: "__quadlet_podman_owned_path"
+        label: "{{ __quadlet_podman_owned_path }}"
+
+
+    # Clear a possible "failed" state so the unit does not stay pinned in
+    # systemd after its file is removed and the daemon reloaded.
+    - name: "Setup | Uninstall | Clear the failed state of the plain systemd units"
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [__quadlet_podman_systemctl_exec_path]
+            + (['--user'] if (__quadlet_podman_rootless | ansible.builtin.bool) else [])
+            + ['reset-failed', __quadlet_podman_owned_path | ansible.builtin.basename]
+          }}
+      become: true
+      become_user: "{{ __quadlet_podman_become_user }}"
+      environment: "{{ __quadlet_podman_task_environment }}"
+      changed_when: false
+      # tolerate units systemd does not know (unit was never started)
+      failed_when: false
+      when:
+        - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+      loop: "{{ __quadlet_podman_systemd_owned_result['stdout_lines'] | ansible.builtin.default([]) }}"
+      loop_control:
+        loop_var: "__quadlet_podman_owned_path"
+        label: "{{ __quadlet_podman_owned_path }}"
+
+
+    - name: "Setup | Uninstall | Remove the plain systemd unit files of the application"
+      ansible.builtin.file:
+        path: "{{ __quadlet_podman_owned_path }}"
+        state: "absent"
+      loop: "{{ __quadlet_podman_systemd_owned_result['stdout_lines'] | ansible.builtin.default([]) }}"
+      loop_control:
+        loop_var: "__quadlet_podman_owned_path"
+        label: "{{ __quadlet_podman_owned_path }}"
+      notify:
+        - "quadlet_podman: systemd daemon-reload"
+
+
+    ### Quadlet units
 
     - name: "Setup | Uninstall | Find Quadlet unit files in the unit directory"
       ansible.builtin.find:

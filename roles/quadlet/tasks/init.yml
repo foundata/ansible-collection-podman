@@ -154,21 +154,40 @@
     quiet: true
 
 
+# The merge result gets pruned: a null section or setting drops that entry
+# entirely, so units can unset something inherited from
+# quadlet_podman_unit_defaults (e.g. Install on a timer-triggered unit).
 - name: "Init | Build the effective unit list (type defaults merged with each unit's sections)"
   ansible.builtin.set_fact:
     __quadlet_podman_units_effective: >-
       {%- set __ns = namespace(units=[]) -%}
       {%- for __u in quadlet_podman_units -%}
       {%-   set __type = __u['type'] -%}
-      {%-   set __sections = (quadlet_podman_unit_defaults[__type] | ansible.builtin.default({}))
+      {%-   set __merged = (quadlet_podman_unit_defaults[__type] | ansible.builtin.default({}))
               | ansible.builtin.combine(__u['sections'], recursive=true) -%}
+      {%-   set __sns = namespace(sections={}) -%}
+      {%-   for __section_name, __section_settings in __merged.items() -%}
+      {%-     if __section_settings is not ansible.builtin.none -%}
+      {%-       set __ins = namespace(settings={}) -%}
+      {%-       for __key, __value in __section_settings.items() -%}
+      {%-         if __value is not ansible.builtin.none -%}
+      {%-           set __ins.settings = __ins.settings | ansible.builtin.combine({__key: __value}) -%}
+      {%-         endif -%}
+      {%-       endfor -%}
+      {%-       if (__ins.settings | ansible.builtin.length) > 0 -%}
+      {%-         set __sns.sections = __sns.sections | ansible.builtin.combine({__section_name: __ins.settings}) -%}
+      {%-       endif -%}
+      {%-     endif -%}
+      {%-   endfor -%}
       {%-   set _ = __ns.units.append({
               'name': __u['name'],
               'type': __type,
               'filename': __u['name'] ~ '.' ~ __type,
               'service': __u['name'] ~ __quadlet_podman_service_suffix_map[__type] ~ '.service',
-              'sections': __sections,
-              'has_install': ('Install' in __sections),
+              'sections': __sns.sections,
+              'has_install': ('Install' in __sns.sections),
+              'service_state': __u['service_state'] | ansible.builtin.default(quadlet_podman_service_state),
+              'managed': ('Install' in __sns.sections) or (__u['service_state'] is ansible.builtin.defined),
             }) -%}
       {%- endfor -%}
       {{ __ns.units }}
@@ -183,6 +202,72 @@
           | ansible.builtin.zip(__quadlet_podman_units_effective | ansible.builtin.map(attribute='service'))
         )
       }}
+
+
+- name: "Init | Check the plain systemd unit input for validity"
+  ansible.builtin.assert:
+    that:
+      # unique file names with a supported unit type suffix
+      - >-
+        (quadlet_podman_systemd_units | ansible.builtin.map(attribute='name') | ansible.builtin.length)
+        ==
+        (quadlet_podman_systemd_units | ansible.builtin.map(attribute='name') | ansible.builtin.unique | ansible.builtin.length)
+      - >-
+        quadlet_podman_systemd_units
+        | ansible.builtin.map(attribute='name')
+        | ansible.builtin.reject('ansible.builtin.match',
+            '^[A-Za-z0-9_.-]+\.(' ~ (__quadlet_podman_systemd_unit_suffixes | ansible.builtin.join('|')) ~ ')$')
+        | ansible.builtin.length == 0
+      # no collision with the application's Quadlet files or their generated
+      # services (a plain "foo.service" would shadow the generated service of
+      # a "foo" container unit)
+      - >-
+        quadlet_podman_systemd_units
+        | ansible.builtin.map(attribute='name')
+        | ansible.builtin.select('ansible.builtin.in',
+            (__quadlet_podman_units_effective | ansible.builtin.map(attribute='service') | ansible.builtin.list)
+            + (__quadlet_podman_units_effective | ansible.builtin.map(attribute='filename') | ansible.builtin.list))
+        | ansible.builtin.length == 0
+    fail_msg: >-
+      Invalid input: names in quadlet_podman_systemd_units must be unique file
+      names matching '^[A-Za-z0-9_.-]+$' with one of these suffixes:
+      {{ __quadlet_podman_systemd_unit_suffixes | ansible.builtin.join(', ') }};
+      they must not collide with a Quadlet unit file or generated service name
+      of quadlet_podman_units.
+    quiet: true
+
+
+- name: "Init | Build the effective plain systemd unit list"
+  ansible.builtin.set_fact:
+    __quadlet_podman_systemd_units_effective: >-
+      {%- set __ns = namespace(units=[]) -%}
+      {%- for __u in quadlet_podman_systemd_units -%}
+      {%-   set __suffix = __u['name'] | ansible.builtin.splitext | ansible.builtin.last
+              | ansible.builtin.regex_replace('^\.', '') -%}
+      {%-   set __sns = namespace(sections={}) -%}
+      {%-   for __section_name, __section_settings in __u['sections'].items() -%}
+      {%-     if __section_settings is not ansible.builtin.none -%}
+      {%-       set __ins = namespace(settings={}) -%}
+      {%-       for __key, __value in __section_settings.items() -%}
+      {%-         if __value is not ansible.builtin.none -%}
+      {%-           set __ins.settings = __ins.settings | ansible.builtin.combine({__key: __value}) -%}
+      {%-         endif -%}
+      {%-       endfor -%}
+      {%-       if (__ins.settings | ansible.builtin.length) > 0 -%}
+      {%-         set __sns.sections = __sns.sections | ansible.builtin.combine({__section_name: __ins.settings}) -%}
+      {%-       endif -%}
+      {%-     endif -%}
+      {%-   endfor -%}
+      {%-   set _ = __ns.units.append({
+              'name': __u['name'],
+              'suffix': __suffix,
+              'main_section': __quadlet_podman_systemd_unit_section_map[__suffix],
+              'sections': __sns.sections,
+              'has_install': ('Install' in __sns.sections),
+              'service_state': __u['service_state'] | ansible.builtin.default(quadlet_podman_service_state),
+            }) -%}
+      {%- endfor -%}
+      {{ __ns.units }}
 
 
 - name: "Init | Check that every pod membership references a pod unit of this application"

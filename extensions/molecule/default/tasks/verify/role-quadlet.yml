@@ -74,6 +74,105 @@
     quiet: true
 
 
+## Run-once patterns and plain systemd units (rootful "webtest")
+
+- name: "Molecule | Verify | quadlet | Read the webtest-job container unit file"
+  ansible.builtin.slurp:
+    src: "/etc/containers/systemd/webtest-job.container"
+  register: __testing_quadlet_job_unit_slurp
+
+
+- name: "Molecule | Verify | quadlet | Check the null-drop rendering of the webtest-job unit"
+  ansible.builtin.assert:
+    that:
+      - "'Managed by Ansible (foundata.podman.quadlet): app=webtest' in __testing_quadlet_job_unit_content"
+      # "Restart: ~" dropped the unit_defaults Restart (and thereby the whole
+      # Service section), "Install: ~" suppressed any Install section
+      - "'Restart=' not in __testing_quadlet_job_unit_content"
+      - "'[Service]' not in __testing_quadlet_job_unit_content"
+      - "'[Install]' not in __testing_quadlet_job_unit_content"
+    fail_msg: >-
+      A null section/setting value did not drop the entry from the rendered
+      unit. Content: {{ __testing_quadlet_job_unit_content }}
+    quiet: true
+  vars:
+    __testing_quadlet_job_unit_content: "{{ __testing_quadlet_job_unit_slurp['content'] | ansible.builtin.b64decode }}"
+
+
+- name: "Molecule | Verify | quadlet | Read the webtest-job timer unit file"
+  ansible.builtin.slurp:
+    src: "/etc/systemd/system/webtest-job.timer"
+  register: __testing_quadlet_timer_unit_slurp
+
+
+- name: "Molecule | Verify | quadlet | Check the webtest-job timer unit content"
+  ansible.builtin.assert:
+    that:
+      # ownership marker (load-bearing for the cleanup logic)
+      - "'Managed by Ansible (foundata.podman.quadlet): app=webtest' in __testing_quadlet_timer_unit_content"
+      # [Timer] Unit= expansion: "webtest-job" -> webtest-job.service
+      - "'Unit=webtest-job.service' in __testing_quadlet_timer_unit_content"
+      - "'OnCalendar=2099-01-01 03:00:00' in __testing_quadlet_timer_unit_content"
+    quiet: true
+  vars:
+    __testing_quadlet_timer_unit_content: "{{ __testing_quadlet_timer_unit_slurp['content'] | ansible.builtin.b64decode }}"
+
+
+- name: "Molecule | Verify | quadlet | Query the webtest-job timer state"
+  ansible.builtin.command:
+    argv:
+      - "systemctl"
+      - "{{ item }}"
+      - "webtest-job.timer"
+  changed_when: false
+  failed_when: false
+  loop:
+    - "is-enabled"
+    - "is-active"
+  register: __testing_quadlet_timer_state_result
+
+
+- name: "Molecule | Verify | quadlet | Check the webtest-job timer is enabled and active"
+  ansible.builtin.assert:
+    that:
+      # plain units support real systemctl enablement (unlike generated ones)
+      - __testing_quadlet_timer_state_result['results'][0]['stdout'] == 'enabled'
+      - __testing_quadlet_timer_state_result['results'][1]['stdout'] == 'active'
+    fail_msg: >-
+      The webtest-job timer is not enabled/active:
+      {{ __testing_quadlet_timer_state_result['results'] | ansible.builtin.map(attribute='stdout') | ansible.builtin.list }}
+    quiet: true
+
+
+- name: "Molecule | Verify | quadlet | Query the run-once service states"
+  ansible.builtin.command:
+    argv:
+      - "systemctl"
+      - "is-active"
+      - "{{ item }}"
+  changed_when: false
+  failed_when: false
+  loop:
+    - "webtest-job.service"
+    - "webtest-init.service"
+  register: __testing_quadlet_runonce_state_result
+
+
+- name: "Molecule | Verify | quadlet | Check the run-once service states"
+  ansible.builtin.assert:
+    that:
+      # "unmanaged": deployed but never started by the role
+      - __testing_quadlet_runonce_state_result['results'][0]['stdout'] == 'inactive'
+      # RemainAfterExit: started once by the role, parked in "active (exited)"
+      # (this also keeps the start task idempotent on the second converge)
+      - __testing_quadlet_runonce_state_result['results'][1]['stdout'] == 'active'
+    fail_msg: >-
+      Unexpected run-once service states (job should be inactive, init
+      active):
+      {{ __testing_quadlet_runonce_state_result['results'] | ansible.builtin.map(attribute='stdout') | ansible.builtin.list }}
+    quiet: true
+
+
 ## Check mode on the deployed application
 #
 # A --check run against the deployed application must succeed (regression:
@@ -182,6 +281,60 @@
     success_msg: "The rootless manifest is root-owned and out of the account's reach."
 
 
+## Plain systemd user units (rootless "usertest")
+
+- name: "Molecule | Verify | quadlet | Read the usertest-job timer unit file (rootless)"
+  ansible.builtin.slurp:
+    src: "/var/lib/podman/containerapp/.config/systemd/user/usertest-job.timer"
+  register: __testing_quadlet_usertimer_slurp
+
+
+- name: "Molecule | Verify | quadlet | Check the usertest-job timer unit content (rootless)"
+  ansible.builtin.assert:
+    that:
+      - "'Managed by Ansible (foundata.podman.quadlet): app=usertest' in __testing_quadlet_usertimer_content"
+      # a value containing a dot is passed through verbatim
+      - "'Unit=usertest-job.service' in __testing_quadlet_usertimer_content"
+    quiet: true
+  vars:
+    __testing_quadlet_usertimer_content: "{{ __testing_quadlet_usertimer_slurp['content'] | ansible.builtin.b64decode }}"
+
+
+- name: "Molecule | Verify | quadlet | Query the plain user unit states (rootless)"
+  ansible.builtin.command:
+    argv:
+      - "systemctl"
+      - "--user"
+      - "{{ item[0] }}"
+      - "{{ item[1] }}"
+  become: true
+  become_user: "containerapp"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts['getent_passwd']['containerapp'][1] }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ ansible_facts['getent_passwd']['containerapp'][1] }}/bus"
+  changed_when: false
+  failed_when: false
+  loop:
+    - ["is-enabled", "usertest-job.timer"]
+    - ["is-active", "usertest-job.timer"]
+    - ["is-active", "usertest-job.service"]
+  register: __testing_quadlet_userunit_state_result
+
+
+- name: "Molecule | Verify | quadlet | Check the plain user unit states (rootless)"
+  ansible.builtin.assert:
+    that:
+      - __testing_quadlet_userunit_state_result['results'][0]['stdout'] == 'enabled'
+      - __testing_quadlet_userunit_state_result['results'][1]['stdout'] == 'active'
+      # "unmanaged": deployed but never started by the role
+      - __testing_quadlet_userunit_state_result['results'][2]['stdout'] == 'inactive'
+    fail_msg: >-
+      Unexpected plain user unit states (timer should be enabled and active,
+      the unmanaged oneshot service inactive):
+      {{ __testing_quadlet_userunit_state_result['results'] | ansible.builtin.map(attribute='stdout') | ansible.builtin.list }}
+    quiet: true
+
+
 # An administrator's own unit file (no ownership marker): the cleanup and
 # uninstall sweeps below must leave it alone even though it lives in the unit
 # directory. The content mentions the webtest marker as a substring on
@@ -198,6 +351,22 @@
       [Container]
       ContainerName=admin-own-decoy
       Image=quay.io/libpod/testimage:20241011
+    owner: "root"
+    group: "root"
+    mode: "u=rw,g=r,o="
+
+
+# Same protection for the shared systemd unit directory: the plain-unit
+# sweeps only own marker-carrying files and must leave every other unit file
+# (the vast majority in /etc/systemd/system) alone.
+- name: "Molecule | Verify | quadlet | Plant an administrator-owned timer file without the marker"
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/admin-own-decoy.timer"
+    content: |
+      # hand-made by the administrator, not Ansible; merely quotes the
+      # "# Managed by Ansible (foundata.podman.quadlet): app=webtest" marker.
+      [Timer]
+      OnCalendar=2099-01-01 03:00:00
     owner: "root"
     group: "root"
     mode: "u=rw,g=r,o="
@@ -462,6 +631,44 @@
       {{ __testing_quadlet_reap_removed_manifest['content'] | ansible.builtin.b64decode | ansible.builtin.from_yaml }}
 
 
+# The two reap re-runs above also de-listed the run-once units and the timer
+# (their variable sets carry neither webtest-init/webtest-job nor any
+# quadlet_podman_systemd_units), so the marker-based sweeps must have removed
+# the files and stopped the timer.
+- name: "Molecule | Verify | quadlet | Reap: check the de-listed run-once and timer unit files"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: __testing_quadlet_reap_units_stat
+  loop:
+    - "/etc/containers/systemd/webtest-init.container"
+    - "/etc/containers/systemd/webtest-job.container"
+    - "/etc/systemd/system/webtest-job.timer"
+
+
+- name: "Molecule | Verify | quadlet | Reap: query the de-listed timer state"
+  ansible.builtin.command:
+    argv:
+      - "systemctl"
+      - "is-active"
+      - "webtest-job.timer"
+  changed_when: false
+  failed_when: false
+  register: __testing_quadlet_reap_timer_state
+
+
+- name: "Molecule | Verify | quadlet | Reap: check the de-listed plain unit was removed and stopped"
+  ansible.builtin.assert:
+    that:
+      - not __testing_quadlet_reap_units_stat['results'][0]['stat']['exists']
+      - not __testing_quadlet_reap_units_stat['results'][1]['stat']['exists']
+      - not __testing_quadlet_reap_units_stat['results'][2]['stat']['exists']
+      - __testing_quadlet_reap_timer_state['stdout'] != 'active'
+    fail_msg: >-
+      De-listed run-once/timer units survived the reconciliation (file left
+      behind or timer still active).
+    success_msg: "De-listed run-once and timer units were removed and stopped."
+
+
 ## Registry logout reconciliation (offline)
 #
 # podman logout only edits the authentication file, so the reconciliation can
@@ -685,18 +892,24 @@
       persistent data.
 
 
-- name: "Molecule | Verify | quadlet | Check the administrator's unit file survived the sweeps"
+- name: "Molecule | Verify | quadlet | Check the administrator's unit files survived the sweeps"
   ansible.builtin.stat:
-    path: "/etc/containers/systemd/admin-own-decoy.container"
+    path: "{{ item }}"
   register: __testing_quadlet_admin_decoy_stat
   failed_when:
     - not __testing_quadlet_admin_decoy_stat['stat']['exists']
+  loop:
+    - "/etc/containers/systemd/admin-own-decoy.container"
+    - "/etc/systemd/system/admin-own-decoy.timer"
 
 
-- name: "Molecule | Verify | quadlet | Remove the administrator-owned test file"
+- name: "Molecule | Verify | quadlet | Remove the administrator-owned test files"
   ansible.builtin.file:
-    path: "/etc/containers/systemd/admin-own-decoy.container"
+    path: "{{ item }}"
     state: "absent"
+  loop:
+    - "/etc/containers/systemd/admin-own-decoy.container"
+    - "/etc/systemd/system/admin-own-decoy.timer"
 
 
 ## Complete removal of the rootless application
@@ -719,6 +932,9 @@
     - "/var/lib/ansible-podman-quadlet/user-containerapp/usertest.ansible-manifest"
     # manifest-recorded managed file (declared lists are empty here)
     - "/var/lib/podman/containerapp/usertest.env"
+    # marker-identified plain user units (declared list is empty here)
+    - "/var/lib/podman/containerapp/.config/systemd/user/usertest-job.timer"
+    - "/var/lib/podman/containerapp/.config/systemd/user/usertest-job.service"
 
 
 - name: "Molecule | Verify | quadlet | Absent: check the rootless application is fully removed"
@@ -727,9 +943,11 @@
       - not __testing_quadlet_absent_rootless_stat['results'][0]['stat']['exists']
       - not __testing_quadlet_absent_rootless_stat['results'][1]['stat']['exists']
       - not __testing_quadlet_absent_rootless_stat['results'][2]['stat']['exists']
+      - not __testing_quadlet_absent_rootless_stat['results'][3]['stat']['exists']
+      - not __testing_quadlet_absent_rootless_stat['results'][4]['stat']['exists']
     fail_msg: >-
-      state "absent" left rootless unit files, the manifest or a
-      manifest-recorded file behind.
+      state "absent" left rootless unit files, plain user units, the manifest
+      or a manifest-recorded file behind.
     success_msg: "state \"absent\" removed the rootless application."
 
 

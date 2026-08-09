@@ -1,0 +1,19 @@
+{%- from '_quadlet_macros.j2' import render_quadlet_unit -%}
+{#-
+  Plain systemd unit file (e.g. a .timer scheduling a run-once container),
+  rendered from one effective entry of quadlet_podman_systemd_units.
+
+  Input variables:
+  - tpl_unit: effective unit dict (name, main_section, sections, ...)
+  - tpl_service_map: unit name -> generated systemd service name
+  - tpl_file_marker: application ownership marker (first line, load-bearing
+    for the cleanup logic - do not change its format)
+-#}
+{{ tpl_file_marker }}
+# {{ ansible_managed }}
+{{ render_quadlet_unit(
+     tpl_unit['sections'],
+     tpl_unit['main_section'],
+     tpl_service_map,
+     __quadlet_podman_dependency_keys
+   ) }}

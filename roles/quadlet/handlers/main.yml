@@ -19,7 +19,10 @@
 
 # Containers only pick up changed unit or environment files when their service
 # gets restarted. Restarts happen in start order (pods first); services are
-# started (not just restarted) if they were not running.
+# started (not just restarted) if they were not running. Only units whose
+# effective per-unit service_state is enabled/running are restarted; e.g. an
+# "unmanaged" run-once container picks up changes at its next timer-triggered
+# or boot start instead.
 - name: "Handlers | Restart application services"
   ansible.builtin.systemd_service:
     name: "{{ __quadlet_podman_service_item }}"
@@ -30,11 +33,32 @@
   environment: "{{ __quadlet_podman_task_environment }}"
   when:
     - quadlet_podman_state == 'present'
-    - quadlet_podman_service_state in ['enabled', 'running']
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
-  loop: "{{ __quadlet_podman_services_managed }}"
+  loop: "{{ __quadlet_podman_services_start }}"
   loop_control:
     loop_var: "__quadlet_podman_service_item"
     label: "{{ __quadlet_podman_service_item }}"
   listen:
     - "quadlet_podman: restart application services"
+
+
+# Changed plain unit files only take effect after a restart of their unit
+# (e.g. a new OnCalendar of a running timer); same per-unit service_state
+# filtering as above.
+- name: "Handlers | Restart application systemd units"
+  ansible.builtin.systemd_service:
+    name: "{{ __quadlet_podman_systemd_unit_name }}"
+    state: "restarted"
+    scope: "{{ __quadlet_podman_systemd_scope }}"
+  become: true
+  become_user: "{{ __quadlet_podman_become_user }}"
+  environment: "{{ __quadlet_podman_task_environment }}"
+  when:
+    - quadlet_podman_state == 'present'
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+  loop: "{{ __quadlet_podman_systemd_units_restart }}"
+  loop_control:
+    loop_var: "__quadlet_podman_systemd_unit_name"
+    label: "{{ __quadlet_podman_systemd_unit_name }}"
+  listen:
+    - "quadlet_podman: restart application systemd units"

@@ -7,6 +7,7 @@ The `foundata.podman.quadlet` Ansible role (part of the `foundata.podman` Ansibl
 ## Table of contents<a id="toc"></a>
 
 - [Example playbooks, using this role](#examples)
+- [Run-once containers and timers](#run-once)
 - [Rootless applications: data, UID mapping and SELinux](#rootless-notes)
 - [Supported tags](#tags)<!-- ANSIBLE DOCSMITH TOC START -->
 - [Role variables](#variables)
@@ -18,6 +19,11 @@ The `foundata.podman.quadlet` Ansible role (part of the `foundata.podman` Ansibl
     - [`quadlet_podman_units['name']`](#variable-quadlet_podman_units-sub-name)
     - [`quadlet_podman_units['type']`](#variable-quadlet_podman_units-sub-type)
     - [`quadlet_podman_units['sections']`](#variable-quadlet_podman_units-sub-sections)
+    - [`quadlet_podman_units['service_state']`](#variable-quadlet_podman_units-sub-service_state)
+  - [`quadlet_podman_systemd_units`](#variable-quadlet_podman_systemd_units)
+    - [`quadlet_podman_systemd_units['name']`](#variable-quadlet_podman_systemd_units-sub-name)
+    - [`quadlet_podman_systemd_units['sections']`](#variable-quadlet_podman_systemd_units-sub-sections)
+    - [`quadlet_podman_systemd_units['service_state']`](#variable-quadlet_podman_systemd_units-sub-service_state)
   - [`quadlet_podman_unit_defaults`](#variable-quadlet_podman_unit_defaults)
     - [`quadlet_podman_unit_defaults['container']`](#variable-quadlet_podman_unit_defaults-sub-container)
     - [`quadlet_podman_unit_defaults['pod']`](#variable-quadlet_podman_unit_defaults-sub-pod)
@@ -150,6 +156,63 @@ Removing an application (stops the services, removes units, secrets and managed 
 
 
 
+## Run-once containers and timers<a id="run-once"></a>
+
+Containers that run a job and exit (initialization, migrations, backups) need different handling than daemons. A run-once service ends up `inactive (dead)` after success, so a naive "ensure started" would re-run the job on every Ansible run and permanently report `changed`. The role supports the two common shapes; do not mix them up, they are mutually exclusive:
+
+**Run once per deployment and configuration change** (e.g. database migrations): keep the unit managed and set `RemainAfterExit` in its `Service` section. The service parks in `active (exited)` after success, so later runs are a no-op (`changed=0`), while the restart-on-change handler still re-runs the job whenever the application's units or managed files change.
+
+```yaml
+quadlet_podman_units:
+  - name: "exampleapp-init"
+    type: "container"
+    sections:
+      Container:
+        ContainerName: "exampleapp-init"
+        Image: "registry.example.com/exampleapp:6"
+        Exec: "exampleapp-init"
+      Service:
+        Restart: "on-failure"
+        RemainAfterExit: true
+      Install:
+        WantedBy:
+          - "multi-user.target"
+```
+
+**Run on a schedule** (e.g. backups): set the unit's `service_state` to `unmanaged` so the role only deploys the file (it neither starts the job on converge nor stops an in-flight run), and ship the timer as a plain systemd unit of the same application via `quadlet_podman_systemd_units`. Do NOT use `RemainAfterExit` here: systemd does not re-trigger a unit that is still active, so the timer would fire into a no-op. Keep an `Install` section on the container if the job should additionally run once per boot, or set `Install: ~` to drop one inherited from `quadlet_podman_unit_defaults`.
+
+```yaml
+quadlet_podman_units:
+  - name: "exampleapp-backup"
+    type: "container"
+    service_state: "unmanaged"
+    sections:
+      Container:
+        ContainerName: "exampleapp-backup"
+        Image: "registry.example.com/exampleapp:6"
+        Exec: "exampleapp-backup"
+      Service:
+        Restart: "no"
+        TimeoutStartSec: 3600
+quadlet_podman_systemd_units:
+  - name: "exampleapp-backup.timer"
+    sections:
+      Unit:
+        Description: "Example application backup timer"
+      Timer:
+        Unit: "exampleapp-backup" # gets expanded to exampleapp-backup.service
+        OnCalendar: "*-*-* 03:00:00"
+        RandomizedDelaySec: "15m"
+        Persistent: true
+      Install:
+        WantedBy:
+          - "timers.target"
+```
+
+Plain units from `quadlet_podman_systemd_units` are managed like the application's Quadlet files (ownership marker, cleanup of de-listed units, removal on `quadlet_podman_state: "absent"`) and support real `systemctl enable`/`disable`. They also cover non-container helpers, e.g. a oneshot `.service` wrapping a host-side script plus its `.timer`.
+
+
+
 ## Rootless applications: data, UID mapping and SELinux<a id="rootless-notes"></a>
 
 **Prefer named volumes for persistent data.** For rootless applications, named volumes (`.volume` units) live below the account's home directory and Podman handles the user namespace ownership for you. Combined with a central home directory (e.g. `/var/lib/podman/<application>`, see the `foundata.podman.host` role's README section on centralizing rootless storage), all persistent data stays in one predictable tree.
@@ -194,6 +257,7 @@ The following variables can be configured for this role:
 | `quadlet_podman_service_state` | `str` | No | `"enabled"` | Defines the status of the service(s).<br><br>`enabled`: Service is running and will start automatically at boot.<br><br>`disabled`: Service is stopped and will not start automatically at boot.<br><br>`running`: Service is running but will not start […](#variable-quadlet_podman_service_state) |
 | `quadlet_podman_user` | `str` | No | `""` | Name of the user account to deploy the application for, selecting rootless or rootful operation:<br><br>- Empty (the default): rootful. Quadlet units are placed below `/etc/containers/systemd/` and the generated services run as system services. - Set […](#variable-quadlet_podman_user) |
 | `quadlet_podman_units` | `list` | No | `[]` | List of the Quadlet units that make up the application. Each list item describes one Quadlet file and is rendered from its `sections` dictionary; the full set of available sections and settings is documented in `man podman-systemd.unit` or […](#variable-quadlet_podman_units) |
+| `quadlet_podman_systemd_units` | `list` | No | `[]` | List of plain systemd units that belong to the application but are not Quadlet types, typically timers that trigger run-once containers or small oneshot helper services. The files are written to `/etc/systemd/system/` (rootful) or […](#variable-quadlet_podman_systemd_units) |
 | `quadlet_podman_unit_defaults` | `dict` | No | `{}` | Default sections and settings applied to every unit in `quadlet_podman_units`, keyed by unit type. Use this to avoid repeating common settings (e.g. restart policy or boot enablement) in each unit; the per-unit `sections` are deep-merged on top and […](#variable-quadlet_podman_unit_defaults) |
 | `quadlet_podman_secrets` | `list` | No | `[]` | List of Podman secrets to manage for the application, created in the scope selected by `quadlet_podman_user` (rootful or the given user's rootless scope).<br><br>Existing secrets are left untouched by default (their value is neither compared nor […](#variable-quadlet_podman_secrets) |
 | `quadlet_podman_registry_auth` | `list` | No | `[]` | List of container registries to log into before images are pulled, in the scope selected by `quadlet_podman_user`. Needed for images from private registries; the credentials are also used by the automatic image updates […](#variable-quadlet_podman_registry_auth) |
@@ -269,6 +333,9 @@ by systems other than Ansible.
 
 The singular form (`service`) is used for simplicity. However, the defined
 status applies to all services if multiple are being managed by this role.
+Individual units can deviate via their own `service_state` entry in
+`quadlet_podman_units` or `quadlet_podman_systemd_units` (e.g. a run-once
+container that only its timer may start).
 
 The role manages the systemd services generated from the units in
 `quadlet_podman_units`, in dependency order (e.g. a pod before its member
@@ -277,7 +344,9 @@ be enabled or disabled via `systemctl`; whether a service starts at boot
 is governed by the `Install` section of its Quadlet unit (usually
 `WantedBy: "multi-user.target"` or `WantedBy: "default.target"`). For
 `enabled`, ensure the relevant units carry an `Install` section; for
-`disabled`, omit it (the role still stops running services).
+`disabled`, omit it (the role still stops running services). Plain units
+from `quadlet_podman_systemd_units` are real unit files, so for them
+`enabled` and `disabled` do use `systemctl enable` / `disable`.
 
 - **Type**: `str`
 - **Required**: No
@@ -331,6 +400,10 @@ Rendering rules:
 - List values are rendered as repeated `Key=value` lines (e.g. for
   `Volume`, `PublishPort`, `Environment`).
 - Boolean values are rendered as `true`/`false`.
+- A `null` value drops the section or setting entirely, which is
+  mainly useful to unset something a unit would otherwise inherit
+  from `quadlet_podman_unit_defaults` (e.g. `Install: ~` on a unit
+  that must not start at boot).
 
 The name of the systemd service generated by a unit depends on its
 type: `<name>.service` for `container` and `kube`,
@@ -426,6 +499,129 @@ settings within that section. See the description of
 
 - **Type**: `dict`
 - **Required**: Yes
+
+#### `quadlet_podman_units['service_state']`<a id="variable-quadlet_podman_units-sub-service_state"></a>
+
+[*⇑ Back to ToC ⇑*](#toc)
+
+Per-unit override of `quadlet_podman_service_state`, with the
+same values and semantics. If unset, the unit follows the
+application-wide value.
+
+The main use case is `unmanaged` for a run-once container that
+only its systemd timer (see `quadlet_podman_systemd_units`) or
+a boot-time `Install` section may start: the role deploys the
+unit file but neither starts the service on converge (no job
+run per deployment, no `changed` report) nor stops it (an
+in-flight run survives converges). Prefer `unmanaged` over
+`disabled` for such units, `disabled` stops the service on
+every run and would kill an in-flight timer-triggered run.
+
+For a run-once container that SHOULD run once per deployment
+and configuration change (e.g. database migrations), no
+override is needed: keep the unit managed and set
+`RemainAfterExit: true` in its `Service` section instead. The
+service then parks in `active (exited)` after success, so the
+role's start task is a no-op on later runs while the
+restart-on-change handler still re-runs it. Do not combine
+`RemainAfterExit` with a timer: systemd does not re-trigger a
+unit that is still active.
+
+- **Type**: `str`
+- **Required**: No
+- **Choices**: `enabled`, `disabled`, `running`, `unmanaged`
+
+
+
+### `quadlet_podman_systemd_units`<a id="variable-quadlet_podman_systemd_units"></a>
+
+[*⇑ Back to ToC ⇑*](#toc)
+
+List of plain systemd units that belong to the application but are
+not Quadlet types, typically timers that trigger run-once containers
+or small oneshot helper services. The files are written to
+`/etc/systemd/system/` (rootful) or `~/.config/systemd/user/` of the
+`quadlet_podman_user` account (rootless) and are managed exactly like
+the application's Quadlet files: marked with the application
+identifier, removed again when de-listed and removed by
+`quadlet_podman_state: "absent"`.
+
+Each item's `sections` dictionary follows the same rendering rules as
+`quadlet_podman_units` (`quadlet_podman_unit_defaults` does not
+apply). As a convenience, the `Unit` setting of `Timer` and `Path`
+sections (and the dependency settings of the `Unit` section) expand
+unit names from `quadlet_podman_units` to their generated service
+names automatically.
+
+Unlike Quadlet-generated services, these are real unit files, so
+`enabled`/`disabled` (from the item's `service_state` or the
+application-wide `quadlet_podman_service_state`) use
+`systemctl enable`/`disable` and honor the unit's `Install` section.
+Changed unit files get a daemon-reload and managed units are
+restarted (so e.g. a changed `OnCalendar` takes effect; with
+`Persistent: true` a schedule moved into the past fires once
+immediately).
+
+Example (a timer starting the generated service of a run-once
+container named `example-job` every night):
+
+```yaml
+quadlet_podman_systemd_units:
+  - name: "example-job.timer"
+    sections:
+      Unit:
+        Description: "Example nightly job timer"
+      Timer:
+        Unit: "example-job"
+        OnCalendar: "*-*-* 03:00:00"
+        RandomizedDelaySec: "15m"
+        Persistent: true
+      Install:
+        WantedBy: "timers.target"
+```
+
+- **Type**: `list`
+- **Required**: No
+- **Default**: `[]`
+- **List Elements**: `dict`
+
+#### `quadlet_podman_systemd_units['name']`<a id="variable-quadlet_podman_systemd_units-sub-name"></a>
+
+[*⇑ Back to ToC ⇑*](#toc)
+
+File name of the systemd unit including its type suffix (e.g.
+`example-job.timer`); one of `.timer`, `.service`, `.target` or
+`.path`. Must be unique and must not collide with a unit file or
+generated service name of `quadlet_podman_units`. Allowed
+characters: letters, digits, `_`, `.` and `-`.
+
+- **Type**: `str`
+- **Required**: Yes
+
+#### `quadlet_podman_systemd_units['sections']`<a id="variable-quadlet_podman_systemd_units-sub-sections"></a>
+
+[*⇑ Back to ToC ⇑*](#toc)
+
+Content of the unit as a dictionary of sections (e.g. `Unit`,
+`Timer`, `Service`, `Install`), following the rendering rules of
+`quadlet_podman_units`.
+
+- **Type**: `dict`
+- **Required**: Yes
+
+#### `quadlet_podman_systemd_units['service_state']`<a id="variable-quadlet_podman_systemd_units-sub-service_state"></a>
+
+[*⇑ Back to ToC ⇑*](#toc)
+
+Per-unit override of `quadlet_podman_service_state`, with the
+same values. If unset, the unit follows the application-wide
+value. Use `unmanaged` for units that are only started by other
+units (e.g. a oneshot service triggered by a timer of the same
+application).
+
+- **Type**: `str`
+- **Required**: No
+- **Choices**: `enabled`, `disabled`, `running`, `unmanaged`
 
 
 

@@ -9,9 +9,14 @@
   - List values become repeated "Key=value" lines (Quadlet/systemd allow
     repeating settings like Volume=, PublishPort= or Environment=).
   - Boolean values are rendered as true/false.
-  - In the [Unit] dependency settings (After=, Requires=, ...), values without
-    a dot that match the name of another unit of the application get expanded
-    to that unit's generated service name (via the passed service map).
+  - In the [Unit] dependency settings (After=, Requires=, ...) and the Unit=
+    setting of [Timer] and [Path] sections, values without a dot that match
+    the name of another unit of the application get expanded to that unit's
+    generated service name (via the passed service map).
+
+  The macros render plain systemd units (e.g. .timer files of
+  quadlet_podman_systemd_units) just as well: only the canonical section
+  order and the Quadlet-specific type section differ per caller.
 -#}
 
 {%- macro render_quadlet_line(key, value) -%}
@@ -31,7 +36,8 @@
 {%- macro render_quadlet_section(name, settings, service_map, dependency_keys) %}
 [{{ name }}]
 {%    for key, value in settings.items() %}
-{%      set is_dependency = (name == 'Unit') and (key in dependency_keys) %}
+{%      set is_dependency = ((name == 'Unit') and (key in dependency_keys))
+                            or ((name in ['Timer', 'Path']) and (key == 'Unit')) %}
 {%      if value is ansible.builtin.sequence and value is not ansible.builtin.string %}
 {%        for item in value %}
 {%          if is_dependency %}
@@ -50,7 +56,8 @@
 
 
 {%- macro render_quadlet_unit(sections, type_section, service_map, dependency_keys) -%}
-{%-   set canonical_order = ['Unit', type_section, 'Service', 'Install'] -%}
+{#-   unique: for plain units the type section may itself be Unit or Service -#}
+{%-   set canonical_order = ['Unit', type_section, 'Service', 'Install'] | ansible.builtin.unique | ansible.builtin.list -%}
 {%-   for name in canonical_order if name in sections %}
 {{ render_quadlet_section(name, sections[name], service_map, dependency_keys) }}
 {%-   endfor -%}

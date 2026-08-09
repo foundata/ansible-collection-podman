@@ -113,6 +113,16 @@ __quadlet_podman_unit_dir_path: >-
   }}
 
 
+# Directory the plain systemd units (quadlet_podman_systemd_units) are written
+# to: the regular systemd search path of the selected scope.
+__quadlet_podman_systemd_unit_dir_path: >-
+  {{
+    (__quadlet_podman_user_home ~ '/.config/systemd/user')
+    if (__quadlet_podman_rootless | ansible.builtin.bool)
+    else '/etc/systemd/system'
+  }}
+
+
 # Ownership and permissions of the Quadlet unit directory and files. For the
 # user scope the owner/group get resolved in tasks/init.yml.
 __quadlet_podman_unit_dir_mode: "u=rwx,g=rx,o=" # 0750
@@ -205,6 +215,26 @@ __quadlet_podman_unit_extensions:
   - "artifact"
 
 
+# Unit types allowed in quadlet_podman_systemd_units (as filename suffixes);
+# also used to find candidate files during cleanup. Deliberately without
+# "socket", "mount" and other types no application manifest has needed so far.
+__quadlet_podman_systemd_unit_suffixes:
+  - "timer"
+  - "service"
+  - "target"
+  - "path"
+
+
+# Section name that holds the type-specific settings of a plain systemd unit
+# (canonical rendering order, analogous to __quadlet_podman_type_section_map;
+# "target" units have no type-specific section).
+__quadlet_podman_systemd_unit_section_map:
+  timer: "Timer"
+  service: "Service"
+  target: "Unit"
+  path: "Path"
+
+
 # Suffix of the systemd service unit generated from a Quadlet file, per unit
 # type: <name><suffix>.service (see "man podman-systemd.unit").
 __quadlet_podman_service_suffix_map:
@@ -246,17 +276,54 @@ __quadlet_podman_dependency_keys:
 
 # Services of the application in start order (pods first, so member containers
 # find their pod service on start); derived from the effective unit list built
-# in tasks/init.yml. Only units carrying an Install section are started or
-# stopped explicitly (volumes/networks/images start on demand as dependencies).
+# in tasks/init.yml. A unit is managed if it carries an Install section
+# (volumes/networks/images without one start on demand as dependencies) or an
+# explicit per-unit service_state; the per-unit effective service_state then
+# decides the list: start (enabled/running, also the restart handler's set) or
+# stop (disabled). Units with an effective "unmanaged" are in neither.
 #
 # Lazy / late-bound evaluation: Jinja renders these variables on access, after
 # tasks/init.yml sets __quadlet_podman_units_effective.
-__quadlet_podman_services_managed: >-
+__quadlet_podman_units_start_order: >-
   {{
     (__quadlet_podman_units_effective | ansible.builtin.selectattr('type', 'ansible.builtin.eq', 'pod')
-     | ansible.builtin.selectattr('has_install') | ansible.builtin.map(attribute='service') | ansible.builtin.list)
+     | ansible.builtin.selectattr('managed') | ansible.builtin.list)
     + (__quadlet_podman_units_effective | ansible.builtin.rejectattr('type', 'ansible.builtin.eq', 'pod')
-       | ansible.builtin.selectattr('has_install') | ansible.builtin.map(attribute='service') | ansible.builtin.list)
+       | ansible.builtin.selectattr('managed') | ansible.builtin.list)
+  }}
+__quadlet_podman_services_start: >-
+  {{
+    __quadlet_podman_units_start_order
+    | ansible.builtin.selectattr('service_state', 'ansible.builtin.in', ['enabled', 'running'])
+    | ansible.builtin.map(attribute='service') | ansible.builtin.list
+  }}
+__quadlet_podman_services_stop: >-
+  {{
+    __quadlet_podman_units_start_order
+    | ansible.builtin.selectattr('service_state', 'ansible.builtin.eq', 'disabled')
+    | ansible.builtin.map(attribute='service') | ansible.builtin.list
+  }}
+
+
+# Plain systemd units (quadlet_podman_systemd_units) the role manages the
+# state of, and the subset the restart-on-change handler may restart; derived
+# from the effective list built in tasks/init.yml (same per-unit
+# service_state logic as above, but every listed plain unit is managed unless
+# its effective state is "unmanaged").
+#
+# Lazy / late-bound evaluation: Jinja renders these variables on access, after
+# tasks/init.yml sets __quadlet_podman_systemd_units_effective.
+__quadlet_podman_systemd_units_manage: >-
+  {{
+    __quadlet_podman_systemd_units_effective
+    | ansible.builtin.rejectattr('service_state', 'ansible.builtin.eq', 'unmanaged')
+    | ansible.builtin.list
+  }}
+__quadlet_podman_systemd_units_restart: >-
+  {{
+    __quadlet_podman_systemd_units_effective
+    | ansible.builtin.selectattr('service_state', 'ansible.builtin.in', ['enabled', 'running'])
+    | ansible.builtin.map(attribute='name') | ansible.builtin.list
   }}
 
 

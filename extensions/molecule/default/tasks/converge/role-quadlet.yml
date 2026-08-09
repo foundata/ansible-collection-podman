@@ -48,6 +48,52 @@
           Install:
             WantedBy:
               - "multi-user.target"
+      # Run-once init pattern: RemainAfterExit parks the service in
+      # "active (exited)" after success, so the started state stays
+      # idempotent (changed=0 on the second converge)
+      - name: "webtest-init"
+        type: "container"
+        sections:
+          Unit:
+            Description: "Molecule webtest run-once init container"
+          Container:
+            ContainerName: "webtest-init"
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "true"
+          Service:
+            RemainAfterExit: true
+          Install:
+            WantedBy:
+              - "multi-user.target"
+      # Run-once job pattern: only the timer below may start it. Also
+      # exercises the null-drop rendering (unsets the Restart default
+      # inherited from quadlet_podman_unit_defaults; no Install at all)
+      - name: "webtest-job"
+        type: "container"
+        service_state: "unmanaged"
+        sections:
+          Unit:
+            Description: "Molecule webtest run-once job container"
+          Container:
+            ContainerName: "webtest-job"
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "true"
+          Service:
+            Restart: ~
+          Install: ~
+    quadlet_podman_systemd_units:
+      - name: "webtest-job.timer"
+        sections:
+          Unit:
+            Description: "Molecule webtest job timer"
+          Timer:
+            # expanded to "webtest-job.service" (generated service name)
+            Unit: "webtest-job"
+            # must never fire during a test run
+            OnCalendar: "2099-01-01 03:00:00"
+          Install:
+            WantedBy:
+              - "timers.target"
 
 
 # The molecule instances are virtual machines, so the rootless START is
@@ -82,3 +128,25 @@
           Install:
             WantedBy:
               - "default.target"
+    # Plain systemd user units: an unmanaged oneshot helper service plus the
+    # timer that triggers it (rootless scope mechanics)
+    quadlet_podman_systemd_units:
+      - name: "usertest-job.service"
+        service_state: "unmanaged"
+        sections:
+          Unit:
+            Description: "Molecule usertest job (oneshot)"
+          Service:
+            Type: "oneshot"
+            ExecStart: "/usr/bin/true"
+      - name: "usertest-job.timer"
+        sections:
+          Unit:
+            Description: "Molecule usertest job timer"
+          Timer:
+            Unit: "usertest-job.service"
+            # must never fire during a test run
+            OnCalendar: "2099-01-01 03:00:00"
+          Install:
+            WantedBy:
+              - "timers.target"
