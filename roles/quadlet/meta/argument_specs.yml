@@ -128,6 +128,15 @@ argument_specs:
           - List values are rendered as repeated `Key=value` lines (e.g. for
             `Volume`, `PublishPort`, `Environment`).
           - Boolean values are rendered as `true`/`false`.
+          - Values of the assignment-list settings `Environment`, `Label` and
+            `Annotation` are quoted for systemd automatically when they
+            contain whitespace, quotes or backslashes, so one list item is
+            always exactly one assignment (e.g. one environment variable,
+            even with spaces in its value). Provide such items unquoted and
+            do not put several assignments into one item. All other settings
+            (e.g. `Exec`, `PodmanArgs`) are rendered verbatim because their
+            grammar word-splits deliberately; quote parts of them yourself
+            where needed.
           - A `null` value drops the section or setting entirely, which is
             mainly useful to unset something a unit would otherwise inherit
             from `quadlet_podman_unit_defaults` (e.g. `Install: ~` on a unit

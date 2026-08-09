@@ -43,6 +43,12 @@
               - "webtest-data.volume:/data"
             EnvironmentFile:
               - "/var/lib/webtest/app.env"
+            # Value with whitespace on purpose: systemd word-splits unquoted
+            # Environment= assignments, so this guards the renderer's quoting
+            # (regression: an unquoted "-Xms1g -Xmx1g" style value lost
+            # everything after the first word at runtime).
+            Environment:
+              - "WEBTEST_SPACES=first second"
             Secret:
               - "webtest_secret,type=env,target=WEBTEST_SECRET"
           Install:

@@ -9,6 +9,14 @@
   - List values become repeated "Key=value" lines (Quadlet/systemd allow
     repeating settings like Volume=, PublishPort= or Environment=).
   - Boolean values are rendered as true/false.
+  - Values of the assignment-list settings Environment=, Label= and
+    Annotation= are quoted for systemd when they contain whitespace, quotes
+    or backslashes: their grammar is a space-separated list, so an unquoted
+    "A=x y" would be split into the assignment "A=x" plus a stray word "y"
+    (silently truncating e.g. an ES_JAVA_OPTS value). One item therefore
+    always stays exactly one assignment. Deliberately NOT applied to
+    command-line settings like Exec= or PodmanArgs=, where word splitting
+    is the intended grammar.
   - In the [Unit] dependency settings (After=, Requires=, ...), the Unit=
     setting of [Timer] and [Path] sections and the Service= setting of
     [Socket] sections, values without a dot that match the name of another
@@ -20,8 +28,26 @@
   order and the Quadlet-specific type section differ per caller.
 -#}
 
+{%- set quadlet_assignment_list_keys = ['Environment', 'Label', 'Annotation'] -%}
+
+{%- macro render_quadlet_assignment(value) -%}
+{%-   set v = value | ansible.builtin.string | ansible.builtin.trim -%}
+{%-   if (' ' in v) or ('\t' in v) or ('"' in v) or ('\\' in v) -%}
+"{{ v | ansible.builtin.replace('\\', '\\\\') | ansible.builtin.replace('"', '\\"') }}"
+{%-   else -%}
+{{ v }}
+{%-   endif -%}
+{%- endmacro -%}
+
+
 {%- macro render_quadlet_line(key, value) -%}
-{{ key }}={{ value | ansible.builtin.ternary('true', 'false') if value is ansible.builtin.boolean else (value | ansible.builtin.string | ansible.builtin.trim) }}
+{%-   if value is ansible.builtin.boolean -%}
+{{ key }}={{ value | ansible.builtin.ternary('true', 'false') }}
+{%-   elif key in quadlet_assignment_list_keys -%}
+{{ key }}={{ render_quadlet_assignment(value) }}
+{%-   else -%}
+{{ key }}={{ value | ansible.builtin.string | ansible.builtin.trim }}
+{%-   endif -%}
 {%- endmacro -%}
 
 

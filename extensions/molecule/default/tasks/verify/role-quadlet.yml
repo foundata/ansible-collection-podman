@@ -16,6 +16,8 @@
       - "'Managed by Ansible (foundata.podman.quadlet): app=webtest' in __testing_quadlet_webtest_unit_content"
       - "'Image=quay.io/libpod/testimage:20241011' in __testing_quadlet_webtest_unit_content"
       - "'Secret=webtest_secret,type=env,target=WEBTEST_SECRET' in __testing_quadlet_webtest_unit_content"
+      # whitespace value quoted for systemd (unquoted it would be word-split)
+      - "'Environment=\"WEBTEST_SPACES=first second\"' in __testing_quadlet_webtest_unit_content"
       # dependency expansion: "webtest-data" (volume) -> webtest-data-volume.service
       - "'After=webtest-data-volume.service' in __testing_quadlet_webtest_unit_content"
       # unit defaults merged into the [Service] section
@@ -23,6 +25,27 @@
     quiet: true
   vars:
     __testing_quadlet_webtest_unit_content: "{{ __testing_quadlet_webtest_unit_slurp['content'] | ansible.builtin.b64decode }}"
+
+
+# The quoting must survive the whole chain (unit file -> Quadlet generator
+# -> podman --env -> container): the variable has to arrive with both words.
+- name: "Molecule | Verify | quadlet | Read the environment of the running webtest container"
+  ansible.builtin.command:
+    argv: ["podman", "exec", "webtest", "env"]
+  register: __testing_quadlet_webtest_env
+  changed_when:
+    - false
+
+
+- name: "Molecule | Verify | quadlet | Assert the whitespace environment value arrived intact"
+  ansible.builtin.assert:
+    that:
+      - "'WEBTEST_SPACES=first second' in __testing_quadlet_webtest_env['stdout_lines']"
+    fail_msg: >-
+      The whitespace-containing environment value was corrupted on its way
+      into the container:
+      {{ __testing_quadlet_webtest_env['stdout_lines'] | ansible.builtin.select('ansible.builtin.match', '^WEBTEST_') | ansible.builtin.list }}
+    success_msg: "Whitespace-containing environment values arrive in the container intact."
 
 
 - name: "Molecule | Verify | quadlet | Query the webtest service state"
