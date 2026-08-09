@@ -16,6 +16,67 @@
 
 ---
 
+# Every declared path gets a recursive restorecon -F: a path like /, /usr or
+# /var would relabel a system tree to container-storage contexts and break
+# the host. The obvious catastrophic mistakes are rejected here; this is a
+# guard rail, not a proof that every accepted path is safe (each accepted
+# tree IS relabeled recursively).
+- name: "Config | SELinux | Check the declared equivalence paths are sane"
+  ansible.builtin.assert:
+    that:
+      # absolute and normalized (no trailing slash, no '..' or '.' segments)
+      - >-
+        __host_podman_selinux_declared_paths
+        | ansible.builtin.reject('ansible.builtin.match', '^/[A-Za-z0-9._][A-Za-z0-9._/-]*$')
+        | ansible.builtin.length == 0
+      - >-
+        __host_podman_selinux_declared_paths
+        | ansible.builtin.select('ansible.builtin.search', '(^|/)\.\.?(/|$)')
+        | ansible.builtin.length == 0
+      - >-
+        __host_podman_selinux_declared_paths
+        | ansible.builtin.select('ansible.builtin.search', '/$')
+        | ansible.builtin.length == 0
+      # not / or a top-level system tree
+      - >-
+        __host_podman_selinux_declared_paths
+        | ansible.builtin.select('ansible.builtin.in',
+            ['/', '/bin', '/boot', '/dev', '/etc', '/home', '/lib', '/lib64',
+             '/opt', '/proc', '/root', '/run', '/sbin', '/srv', '/sys',
+             '/tmp', '/usr', '/var'])
+        | ansible.builtin.length == 0
+      # not below /var/lib/containers (already carries the contexts)
+      - >-
+        __host_podman_selinux_declared_paths
+        | ansible.builtin.select('ansible.builtin.match', '^/var/lib/containers(/|$)')
+        | ansible.builtin.length == 0
+      # no duplicates and no nesting among the declared paths themselves
+      - >-
+        (__host_podman_selinux_declared_paths | ansible.builtin.length)
+        == (__host_podman_selinux_declared_paths | ansible.builtin.unique | ansible.builtin.length)
+      - >-
+        {%- set __ns = namespace(nested=false) -%}
+        {%- for __a in __host_podman_selinux_declared_paths -%}
+        {%-   for __b in __host_podman_selinux_declared_paths -%}
+        {%-     if __a != __b and __a.startswith(__b ~ '/') -%}
+        {%-       set __ns.nested = true -%}
+        {%-     endif -%}
+        {%-   endfor -%}
+        {%- endfor -%}
+        {{ not __ns.nested }}
+    fail_msg: >-
+      Invalid host_podman_selinux_label_paths
+      ({{ __host_podman_selinux_declared_paths | ansible.builtin.join(', ') }}):
+      paths have to be absolute, normalized dedicated subtrees (e.g.
+      /var/lib/podman or /srv/containers). The filesystem root, top-level
+      system trees, anything below /var/lib/containers (already labeled),
+      duplicates and nested declarations are rejected because every accepted
+      tree is relabeled recursively.
+    quiet: true
+  when:
+    - (__host_podman_selinux_declared_paths | ansible.builtin.length) > 0
+
+
 - name: "Config | SELinux | Read the manifest of role-created equivalence rules"
   ansible.builtin.slurp:
     src: "{{ __host_podman_selinux_manifest_file_path }}"
