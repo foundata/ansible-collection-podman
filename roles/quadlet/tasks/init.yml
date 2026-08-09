@@ -347,22 +347,24 @@
       {{ __ns.units }}
 
 
-- name: "Init | Check that every pod membership references a pod unit of this application"
+# Podman's generator requires the Quadlet FILE name including the .pod
+# suffix in Pod= (a bare pod name is rejected when the unit is generated).
+# Pods of other applications in the same scope are legitimate targets: the
+# generator resolves them and creates the service relationship itself, so
+# only the syntax is validated here. The role's own start ordering (pods
+# before their members) still applies to pods of this application.
+- name: "Init | Check that pod memberships use the .pod file name"
   ansible.builtin.assert:
     that:
       - >-
-        (__quadlet_podman_unit_item['sections']['Container']['Pod'] | ansible.builtin.regex_replace('\.pod$', ''))
-        in (
-          __quadlet_podman_units_effective
-          | ansible.builtin.selectattr('type', 'ansible.builtin.eq', 'pod')
-          | ansible.builtin.map(attribute='name')
-          | ansible.builtin.list
-        )
+        __quadlet_podman_unit_item['sections']['Container']['Pod']
+        is ansible.builtin.search('\.pod$')
     fail_msg: >-
       The unit '{{ __quadlet_podman_unit_item['name'] }}' references
-      '{{ __quadlet_podman_unit_item['sections']['Container']['Pod'] }}' but
-      quadlet_podman_units contains no pod unit of that name. Add the pod unit
-      to the same application (the role manages an application as one set).
+      Pod '{{ __quadlet_podman_unit_item['sections']['Container']['Pod'] }}':
+      Podman requires the Quadlet file name including the '.pod' suffix
+      (e.g. 'shared.pod'). Pods of other applications in the same scope may
+      be referenced; converge their application first.
     quiet: true
   when:
     - __quadlet_podman_unit_item['type'] == 'container'
