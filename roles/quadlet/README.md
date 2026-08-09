@@ -353,6 +353,11 @@ is governed by the `Install` section of its Quadlet unit (usually
 `disabled`, omit it (the role still stops running services). Plain units
 from `quadlet_podman_systemd_units` are real unit files, so for them
 `enabled` and `disabled` do use `systemctl enable` / `disable`.
+For plain units the semantics are explicit: `enabled` requires an
+`Install` section (the role fails otherwise); `running` and
+`disabled` actively disable the unit, so an enablement symlink left
+behind by an earlier `Install`-carrying version of the file cannot
+survive a state that demands no boot start.
 
 - **Type**: `str`
 - **Required**: No

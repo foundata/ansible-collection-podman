@@ -57,19 +57,43 @@
 
 
 # Unlike Quadlet-generated services, plain unit files support systemctl
-# enable/disable; the enablement is only touched for units carrying an
-# Install section ("enabled" without one would fail, see the
-# quadlet_podman_systemd_units docs).
+# enable/disable, with explicit semantics: "enabled" enables the unit (an
+# Install section is required, checked at init); "running" and "disabled"
+# actively disable it, so an enablement symlink left behind by an earlier
+# [Install]-carrying version of the file cannot survive a state that demands
+# no boot start. The tolerant systemctl command is used for disabling on
+# purpose: the CURRENT file may carry no [Install] anymore, where the
+# systemd_service module would fail instead of removing the old symlink.
+- name: "Service | Default | Disable the plain systemd units of the application (state running or disabled)"
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [__quadlet_podman_systemctl_exec_path]
+        + (['--user'] if (__quadlet_podman_rootless | ansible.builtin.bool) else [])
+        + ['disable', __quadlet_podman_systemd_unit_item['name']]
+      }}
+  become: true
+  become_user: "{{ __quadlet_podman_become_user }}"
+  environment: "{{ __quadlet_podman_task_environment }}"
+  register: __quadlet_podman_systemd_disable_result
+  changed_when:
+    - "'Removed' in (__quadlet_podman_systemd_disable_result['stderr'] | ansible.builtin.default(''))"
+  # tolerate units without installation configuration
+  failed_when: false
+  when:
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+    - __quadlet_podman_systemd_unit_item['service_state'] in ['running', 'disabled']
+  loop: "{{ __quadlet_podman_systemd_units_manage }}"
+  loop_control:
+    loop_var: "__quadlet_podman_systemd_unit_item"
+    label: "{{ __quadlet_podman_systemd_unit_item['name'] }}"
+
+
 - name: "Service | Default | Manage the plain systemd units of the application"
   ansible.builtin.systemd_service:
     name: "{{ __quadlet_podman_systemd_unit_item['name'] }}"
     state: "{{ 'started' if __quadlet_podman_systemd_unit_state in ['enabled', 'running'] else 'stopped' }}"
-    enabled: >-
-      {{
-        (__quadlet_podman_systemd_unit_state == 'enabled')
-        if (__quadlet_podman_systemd_unit_item['has_install'] | ansible.builtin.bool)
-        else omit
-      }}
+    enabled: "{{ true if (__quadlet_podman_systemd_unit_state == 'enabled') else omit }}"
     scope: "{{ __quadlet_podman_systemd_scope }}"
   become: true
   become_user: "{{ __quadlet_podman_become_user }}"

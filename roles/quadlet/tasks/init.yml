@@ -347,6 +347,29 @@
       {{ __ns.units }}
 
 
+# "enabled" promises a boot start, which a plain unit can only deliver with
+# an Install section; "running" and "disabled" actively disable instead.
+- name: "Init | Check enabled plain systemd units carry an Install section"
+  ansible.builtin.assert:
+    that:
+      - >-
+        __quadlet_podman_systemd_units_effective
+        | ansible.builtin.selectattr('service_state', 'ansible.builtin.equalto', 'enabled')
+        | ansible.builtin.rejectattr('has_install')
+        | ansible.builtin.length == 0
+    fail_msg: >-
+      Invalid input: these plain systemd units have service state "enabled"
+      but no Install section (so they cannot start at boot):
+      {{
+        __quadlet_podman_systemd_units_effective
+        | ansible.builtin.selectattr('service_state', 'ansible.builtin.equalto', 'enabled')
+        | ansible.builtin.rejectattr('has_install')
+        | ansible.builtin.map(attribute='name') | ansible.builtin.join(', ')
+      }}.
+      Add an Install section (e.g. WantedBy) or use "running"/"disabled".
+    quiet: true
+
+
 # Podman's generator requires the Quadlet FILE name including the .pod
 # suffix in Pod= (a bare pod name is rejected when the unit is generated).
 # Pods of other applications in the same scope are legitimate targets: the
