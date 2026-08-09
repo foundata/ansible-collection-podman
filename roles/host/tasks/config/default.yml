@@ -3,7 +3,16 @@
 ---
 
 # "Distribution is supported" does not guarantee a new-enough Podman (pinned
-# or third-party repositories), so check the actually installed version.
+# or third-party repositories), so check the actually installed version. The
+# binary can be legitimately absent in check mode (the install phase gets
+# skipped there on a fresh host), so its presence gates the probe; in a real
+# run the install phase has either provided the binary or already failed.
+- name: "Config | Default | Check whether the Podman binary is present"
+  ansible.builtin.stat:
+    path: "{{ __host_podman_podman_exec_path }}"
+  register: __host_podman_exec_stat
+
+
 - name: "Config | Default | Determine the installed Podman version"
   ansible.builtin.command:
     argv:
@@ -11,6 +20,11 @@
       - "--version"
   register: __host_podman_version_result
   changed_when: false
+  # The probe is read-only; run it under "--check" too, otherwise it is
+  # skipped and the next task fails on the missing stdout.
+  check_mode: false
+  when:
+    - __host_podman_exec_stat['stat']['exists']
 
 
 - name: "Config | Default | Store the installed Podman version as fact"
@@ -20,6 +34,8 @@
         __host_podman_version_result['stdout']
         | ansible.builtin.regex_search('[0-9]+\.[0-9]+(\.[0-9]+)?')
       }}
+  when:
+    - __host_podman_exec_stat['stat']['exists']
 
 
 - name: "Config | Default | Check Podman version requirement and fail if unmet"
@@ -30,6 +46,7 @@
       Podman 4.x, e.g. CNI networking and slirp4netns). Podman
       {{ __host_podman_version }} was found at {{ __host_podman_podman_exec_path }}.
   when:
+    - __host_podman_exec_stat['stat']['exists']
     - __host_podman_version is ansible.builtin.version(__host_podman_min_podman_version, '<')
 
 

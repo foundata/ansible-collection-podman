@@ -1041,3 +1041,48 @@
       loop:
         - "/var/lib/molecule-foreign-store"
         - "/var/lib/molecule-own-store"
+
+
+## Check mode on the deployed host
+#
+# A --check run against the deployed host must succeed (regression: the
+# read-only Podman version probe lacked check_mode: false, was skipped in
+# check mode and the next task failed dereferencing the missing stdout) and
+# must not change anything on disk. The managed containers.conf drop-in
+# serves as the on-disk witness: its state (existence and content) must be
+# identical before and after the check-mode run. The before-snapshot is
+# needed because the earlier verify sections re-run the role with varying
+# variables, so the drop-in's state at this point is not the converge state
+# (e.g. the timer-settings integration runs pass no host_podman_settings,
+# which legitimately removes the drop-in).
+
+- name: "Molecule | Verify | host | Check mode: get information about the managed containers.conf drop-in (before)"
+  ansible.builtin.stat:
+    path: "/etc/containers/containers.conf.d/50-managed.conf"
+  register: __testing_host_checkmode_dropin_before
+
+
+- name: "Molecule | Verify | host | Run the role in check mode on the deployed host"
+  ansible.builtin.include_role:
+    name: "foundata.podman.host"
+    apply:
+      check_mode: true
+  vars:
+    host_podman_state: "present"
+
+
+- name: "Molecule | Verify | host | Check mode: get information about the managed containers.conf drop-in (after)"
+  ansible.builtin.stat:
+    path: "/etc/containers/containers.conf.d/50-managed.conf"
+  register: __testing_host_checkmode_dropin_after
+
+
+- name: "Molecule | Verify | host | Check mode: assert nothing was changed"
+  ansible.builtin.assert:
+    that:
+      - __testing_host_checkmode_dropin_after['stat']['exists'] == __testing_host_checkmode_dropin_before['stat']['exists']
+      - >-
+        (not __testing_host_checkmode_dropin_before['stat']['exists'])
+        or (__testing_host_checkmode_dropin_after['stat']['checksum'] == __testing_host_checkmode_dropin_before['stat']['checksum'])
+    fail_msg: "The check-mode run changed the managed containers.conf drop-in on disk."
+    success_msg: "The check-mode run succeeded without changing the deployed host."
