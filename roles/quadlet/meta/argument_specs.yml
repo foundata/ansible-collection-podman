@@ -164,6 +164,14 @@ argument_specs:
           The role only orders starts for pods of the same application, so
           converge the pod's application first.
 
+          Unit file names and generated service names form ONE scope-wide
+          systemd namespace across all applications: collisions with the
+          units or services another application's manifest records are
+          rejected, and a destination file that already exists is only
+          overwritten when it carries this application's ownership marker
+          (files of other applications and unmarked administrator files are
+          rejected, never touched).
+
           As a convenience, values in the `Unit`
           section's `After`, `Requires`, `Wants`, `BindsTo`, `PartOf` and
           `Before` settings that match the `name` of another unit in this list

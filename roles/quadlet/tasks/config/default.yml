@@ -111,66 +111,6 @@
     - "quadlet_podman: restart application services"
 
 
-# The manifests of the other applications in this scope are needed twice:
-# for the exclusive-ownership check right below and for the registry logout
-# further down (shared authfile).
-- name: "Config | Default | Find the manifests of the other applications in this scope"
-  ansible.builtin.find:
-    paths: "{{ __quadlet_podman_manifest_dir_path }}"
-    patterns:
-      - "*.ansible-manifest"
-    file_type: "file"
-  register: __quadlet_podman_manifest_find
-
-
-- name: "Config | Default | Read the manifests of the other applications in this scope"
-  ansible.builtin.slurp:
-    src: "{{ item }}"
-  register: __quadlet_podman_other_manifests_slurp
-  loop: >-
-    {{
-      __quadlet_podman_manifest_find['files']
-      | ansible.builtin.map(attribute='path')
-      | ansible.builtin.reject('ansible.builtin.eq', __quadlet_podman_manifest_file_path)
-      | ansible.builtin.list
-    }}
-  loop_control:
-    label: "{{ item }}"
-
-
-# Resources are exclusively owned: declaration is authoritative for existence
-# and content, so two applications of one scope claiming the same secret name
-# or managed file would rewrite and delete each other's resources. Reject the
-# conflict before anything is changed (a shared credential can be declared
-# per application under different secret names with the same value).
-- name: "Config | Default | Check the declared secrets and files are not claimed by another application"
-  ansible.builtin.assert:
-    that:
-      - (__quadlet_podman_secret_conflicts | ansible.builtin.length) == 0
-      - (__quadlet_podman_file_conflicts | ansible.builtin.length) == 0
-    fail_msg: >-
-      Another application's manifest in this scope already records these
-      resources: secrets
-      [{{ __quadlet_podman_secret_conflicts | ansible.builtin.join(', ') }}],
-      files [{{ __quadlet_podman_file_conflicts | ansible.builtin.join(', ') }}].
-      Each secret name and managed file belongs to exactly one application.
-    quiet: true
-  vars:
-    __quadlet_podman_other_claims: >-
-      {%- set __ns = namespace(secrets=[], files=[]) -%}
-      {%- for __result in (__quadlet_podman_other_manifests_slurp['results'] | ansible.builtin.default([])) -%}
-      {%-   set __manifest = ((__result['content'] | ansible.builtin.default('') | ansible.builtin.b64decode
-                               | ansible.builtin.from_yaml) | ansible.builtin.default({}, true)) -%}
-      {%-   set __ns.secrets = __ns.secrets + (__manifest['secrets'] | ansible.builtin.default([])) -%}
-      {%-   set __ns.files = __ns.files + (__manifest['files'] | ansible.builtin.default([])) -%}
-      {%- endfor -%}
-      {{ {'secrets': __ns.secrets, 'files': __ns.files} }}
-    __quadlet_podman_secret_conflicts: >-
-      {{ __quadlet_podman_secret_names_declared | ansible.builtin.intersect(__quadlet_podman_other_claims['secrets']) }}
-    __quadlet_podman_file_conflicts: >-
-      {{ __quadlet_podman_file_dests_declared | ansible.builtin.intersect(__quadlet_podman_other_claims['files']) }}
-
-
 # Declared secrets are authoritative for existence AND content: the current
 # value is read back (never logged) and a secret is only recreated when its
 # value differs, keeping runs idempotent without exposing data. Rotation is
@@ -580,7 +520,10 @@
 ### Cleanup: reap manifest-recorded resources that are no longer declared
 ### (renamed or de-listed secrets, managed files and registry logins)
 
-# Only secret names are handled here, no secret values are involved.
+# Only secret names are handled here, no secret values are involved. A stale
+# name still claimed by ANOTHER application's current manifest (a leftover
+# duplicate claim from role versions without the exclusivity check) is left
+# for that application instead of deleting it away underneath it.
 - name: "Config | Default | Remove Podman secrets no longer declared"
   containers.podman.podman_secret:
     name: "{{ __quadlet_podman_stale_secret }}"
@@ -593,6 +536,7 @@
     {{
       (__quadlet_podman_manifest_old['secrets'] | ansible.builtin.default([]))
       | ansible.builtin.reject('ansible.builtin.in', __quadlet_podman_secret_names_declared)
+      | ansible.builtin.reject('ansible.builtin.in', __quadlet_podman_other_claims_now['secrets'])
       | ansible.builtin.list
     }}
   loop_control:
@@ -607,6 +551,7 @@
     {{
       (__quadlet_podman_manifest_old['files'] | ansible.builtin.default([]))
       | ansible.builtin.reject('ansible.builtin.in', __quadlet_podman_file_dests_declared)
+      | ansible.builtin.reject('ansible.builtin.in', __quadlet_podman_other_claims_now['files'])
       | ansible.builtin.list
     }}
   loop_control:
@@ -698,6 +643,20 @@
       unit_dirs:
         - "{{ __quadlet_podman_unit_dir_path }}"
         - "{{ __quadlet_podman_systemd_unit_dir_path }}"
+      # unit file names and generated service names form one scope-wide
+      # namespace; recording them lets other applications detect collisions
+      units: >-
+        {{
+          ((__quadlet_podman_units_effective | ansible.builtin.map(attribute='filename') | ansible.builtin.list)
+           + (__quadlet_podman_systemd_units_effective | ansible.builtin.map(attribute='name') | ansible.builtin.list))
+          | ansible.builtin.sort
+        }}
+      services: >-
+        {{
+          ((__quadlet_podman_units_effective | ansible.builtin.map(attribute='service') | ansible.builtin.list)
+           + (__quadlet_podman_systemd_units_effective | ansible.builtin.map(attribute='name') | ansible.builtin.list))
+          | ansible.builtin.sort
+        }}
   when: >-
     ((__quadlet_podman_secret_names_declared | ansible.builtin.length) > 0)
     or ((__quadlet_podman_file_dests_declared | ansible.builtin.length) > 0)
