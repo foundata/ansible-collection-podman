@@ -16,9 +16,13 @@
   ansible.builtin.debug:
     msg: >-
       The account '{{ quadlet_podman_user }}' (quadlet_podman_user) does not
-      exist (anymore); the account-dependent removals (services, unit files,
-      secrets, registry logins) are skipped, the root-side cleanup (manifest,
-      manifest-recorded files) still runs.
+      exist (anymore); the account-dependent removals (service stops, secret
+      and registry-login removal) are skipped. The root-side cleanup still
+      runs: manifest, manifest-recorded files and the application's unit
+      files in the recorded (possibly preserved) directories. Podman secrets
+      and container storage inside a preserved home cannot be removed
+      selectively without the account; remove the home directory itself if
+      nothing in it is needed anymore.
   when:
     - __quadlet_podman_rootless | ansible.builtin.bool
     - not (__quadlet_podman_user_exists | ansible.builtin.bool)
@@ -400,6 +404,60 @@
         }}
       loop_control:
         loop_var: "__quadlet_podman_registry"
+
+
+# Root-side unit file cleanup for a vanished rootless account: the unit
+# directories derive from the account's home, so they come from the manifest
+# here. Plain file operations need no user context; only marker-owned files
+# are touched. The (dead) user services cannot be stopped without the
+# account; a lingering user manager ends at the latest with the next reboot.
+- name: "Setup | Uninstall | Remove the unit files of the application (account already removed)"
+  when:
+    - __quadlet_podman_rootless | ansible.builtin.bool
+    - not (__quadlet_podman_user_exists | ansible.builtin.bool)
+    - (__quadlet_podman_manifest_old['unit_dirs'] | ansible.builtin.default([]) | ansible.builtin.length) > 0
+  block:
+
+    - name: "Setup | Uninstall | Find unit files in the recorded unit directories"
+      ansible.builtin.find:
+        paths: "{{ __quadlet_podman_manifest_old['unit_dirs'] }}"
+        patterns: >-
+          {{
+            (__quadlet_podman_unit_extensions + __quadlet_podman_systemd_unit_suffixes)
+            | ansible.builtin.unique
+            | ansible.builtin.map('ansible.builtin.regex_replace', '^', '*.')
+            | ansible.builtin.list
+          }}
+        file_type: "file"
+      register: __quadlet_podman_orphan_find_result
+
+
+    - name: "Setup | Uninstall | Determine the orphaned unit files of the application"
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [__quadlet_podman_grep_exec_path, '-l', '-s', '-x', '-F', '--', __quadlet_podman_file_marker]
+            + (__quadlet_podman_orphan_find_result['files'] | ansible.builtin.map(attribute='path') | ansible.builtin.list)
+          }}
+      register: __quadlet_podman_orphan_owned_result
+      changed_when: false
+      # read-only probe; run it under "--check" too so check mode reports the
+      # removals instead of silently skipping them
+      check_mode: false
+      failed_when:
+        - __quadlet_podman_orphan_owned_result['rc'] not in [0, 1, 2]
+      when:
+        - (__quadlet_podman_orphan_find_result['files'] | ansible.builtin.length) > 0
+
+
+    - name: "Setup | Uninstall | Remove the orphaned unit files of the application"
+      ansible.builtin.file:
+        path: "{{ __quadlet_podman_orphan_path }}"
+        state: "absent"
+      loop: "{{ __quadlet_podman_orphan_owned_result['stdout_lines'] | ansible.builtin.default([]) }}"
+      loop_control:
+        loop_var: "__quadlet_podman_orphan_path"
+        label: "{{ __quadlet_podman_orphan_path }}"
 
 
 - name: "Setup | Uninstall | Remove the managed files of the application"

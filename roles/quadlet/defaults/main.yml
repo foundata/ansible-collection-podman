@@ -17,6 +17,12 @@
 # named volumes are NOT removed to protect persistent application data; remove
 # those manually or with dedicated tasks if really needed.
 #
+# If the rootless account was already deleted, the application's unit files are
+# still removed from the recorded (possibly preserved) directories together with
+# the manifest. Podman secrets and container storage inside a preserved home
+# cannot be removed selectively without the account; remove the home directory
+# itself if nothing in it is needed anymore.
+#
 # - Type: str
 # - Required: No
 # - Default: present

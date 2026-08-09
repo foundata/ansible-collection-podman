@@ -692,10 +692,18 @@
       files: "{{ __quadlet_podman_file_dests_declared | ansible.builtin.sort }}"
       registries: "{{ __quadlet_podman_registries_declared | ansible.builtin.sort }}"
       secrets: "{{ __quadlet_podman_secret_names_declared | ansible.builtin.sort }}"
+      # recorded so a later "state: absent" can remove the unit files even
+      # when the rootless account is already gone (the directory paths derive
+      # from the account's home and cannot be resolved without it)
+      unit_dirs:
+        - "{{ __quadlet_podman_unit_dir_path }}"
+        - "{{ __quadlet_podman_systemd_unit_dir_path }}"
   when: >-
     ((__quadlet_podman_secret_names_declared | ansible.builtin.length) > 0)
     or ((__quadlet_podman_file_dests_declared | ansible.builtin.length) > 0)
     or ((__quadlet_podman_registries_declared | ansible.builtin.length) > 0)
+    or ((quadlet_podman_units | ansible.builtin.length) > 0)
+    or ((quadlet_podman_systemd_units | ansible.builtin.length) > 0)
 
 
 - name: "Config | Default | Remove the application manifest (no recorded resources)"
