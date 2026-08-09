@@ -356,15 +356,18 @@
 - name: "Init | Check that pod memberships use the .pod file name"
   ansible.builtin.assert:
     that:
+      # the complete Quadlet FILE NAME syntax: safe characters only, no path
+      # separators (a path like '../shared.pod' is not a unit file name)
       - >-
         __quadlet_podman_unit_item['sections']['Container']['Pod']
-        is ansible.builtin.search('\.pod$')
+        is ansible.builtin.match('^[A-Za-z0-9_.-]+\.pod$')
     fail_msg: >-
       The unit '{{ __quadlet_podman_unit_item['name'] }}' references
       Pod '{{ __quadlet_podman_unit_item['sections']['Container']['Pod'] }}':
-      Podman requires the Quadlet file name including the '.pod' suffix
-      (e.g. 'shared.pod'). Pods of other applications in the same scope may
-      be referenced; converge their application first.
+      Podman requires the plain Quadlet file name including the '.pod'
+      suffix (e.g. 'shared.pod'; characters from 'A-Za-z0-9_.-', no path
+      separators). Pods of other applications in the same scope may be
+      referenced; converge their application first.
     quiet: true
   when:
     - __quadlet_podman_unit_item['type'] == 'container'

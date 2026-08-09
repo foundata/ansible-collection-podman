@@ -1169,14 +1169,46 @@
         __testing_quadlet_barepod_rejected: true
 
 
-- name: "Molecule | Verify | quadlet | Pod reference: assert the bare pod name was rejected"
+- name: "Molecule | Verify | quadlet | Pod reference: attempt a path as pod reference"
+  block:
+
+    - name: "Molecule | Verify | quadlet | Pod reference: include the role with a path Pod value"
+      ansible.builtin.include_role:
+        name: "foundata.podman.quadlet"
+      vars:
+        quadlet_podman_app: "podtest"
+        quadlet_podman_units:
+          - name: "podmember"
+            type: "container"
+            sections:
+              Container:
+                ContainerName: "podmember"
+                Image: "quay.io/libpod/testimage:20241011"
+                Exec: "top"
+                Pod: "../shared.pod"
+
+    - name: "Molecule | Verify | quadlet | Pod reference: record that the path was accepted"
+      ansible.builtin.set_fact:
+        __testing_quadlet_pathpod_rejected: false
+
+  rescue:
+
+    - name: "Molecule | Verify | quadlet | Pod reference: record that the path was rejected"
+      ansible.builtin.set_fact:
+        __testing_quadlet_pathpod_rejected: true
+
+
+- name: "Molecule | Verify | quadlet | Pod reference: assert the invalid pod references were rejected"
   ansible.builtin.assert:
     that:
       - __testing_quadlet_barepod_rejected | ansible.builtin.bool
+      - __testing_quadlet_pathpod_rejected | ansible.builtin.bool
     fail_msg: >-
-      A bare Pod value without the '.pod' suffix passed validation; Podman's
-      generator would reject the unit later.
-    success_msg: "Pod references without the '.pod' file suffix are rejected."
+      An invalid Pod value passed validation (bare name rejected:
+      {{ __testing_quadlet_barepod_rejected }}, path rejected:
+      {{ __testing_quadlet_pathpod_rejected }}); Podman requires the plain
+      Quadlet file name with the '.pod' suffix.
+    success_msg: "Pod references without the '.pod' file suffix or with path separators are rejected."
 
 
 - name: "Molecule | Verify | quadlet | Check the administrator's unit files survived the sweeps"
