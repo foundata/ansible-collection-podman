@@ -93,7 +93,6 @@ The Quadlet role deploys and manages rootful or rootless OCI applications as dec
       - [`quadlet_podman_secrets['name']`](roles/quadlet/README.md#variable-quadlet_podman_secrets-sub-name)
       - [`quadlet_podman_secrets['value']`](roles/quadlet/README.md#variable-quadlet_podman_secrets-sub-value)
       - [`quadlet_podman_secrets['state']`](roles/quadlet/README.md#variable-quadlet_podman_secrets-sub-state)
-      - [`quadlet_podman_secrets['force']`](roles/quadlet/README.md#variable-quadlet_podman_secrets-sub-force)
     - [`quadlet_podman_registry_auth`](roles/quadlet/README.md#variable-quadlet_podman_registry_auth)
       - [`quadlet_podman_registry_auth['registry']`](roles/quadlet/README.md#variable-quadlet_podman_registry_auth-sub-registry)
       - [`quadlet_podman_registry_auth['username']`](roles/quadlet/README.md#variable-quadlet_podman_registry_auth-sub-username)

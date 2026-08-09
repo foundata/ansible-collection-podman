@@ -37,7 +37,6 @@ The `foundata.podman.quadlet` Ansible role (part of the `foundata.podman` Ansibl
     - [`quadlet_podman_secrets['name']`](#variable-quadlet_podman_secrets-sub-name)
     - [`quadlet_podman_secrets['value']`](#variable-quadlet_podman_secrets-sub-value)
     - [`quadlet_podman_secrets['state']`](#variable-quadlet_podman_secrets-sub-state)
-    - [`quadlet_podman_secrets['force']`](#variable-quadlet_podman_secrets-sub-force)
   - [`quadlet_podman_registry_auth`](#variable-quadlet_podman_registry_auth)
     - [`quadlet_podman_registry_auth['registry']`](#variable-quadlet_podman_registry_auth-sub-registry)
     - [`quadlet_podman_registry_auth['username']`](#variable-quadlet_podman_registry_auth-sub-username)
@@ -259,10 +258,10 @@ The following variables can be configured for this role:
 | `quadlet_podman_units` | `list` | No | `[]` | List of the Quadlet units that make up the application. Each list item describes one Quadlet file and is rendered from its `sections` dictionary; the full set of available sections and settings is documented in `man podman-systemd.unit` or […](#variable-quadlet_podman_units) |
 | `quadlet_podman_systemd_units` | `list` | No | `[]` | List of plain systemd units that belong to the application but are not Quadlet types, typically timers that trigger run-once containers or small oneshot helper services. The files are written to `/etc/systemd/system/` (rootful) or […](#variable-quadlet_podman_systemd_units) |
 | `quadlet_podman_unit_defaults` | `dict` | No | `{}` | Default sections and settings applied to every unit in `quadlet_podman_units`, keyed by unit type. Use this to avoid repeating common settings (e.g. restart policy or boot enablement) in each unit; the per-unit `sections` are deep-merged on top and […](#variable-quadlet_podman_unit_defaults) |
-| `quadlet_podman_secrets` | `list` | No | `[]` | List of Podman secrets to manage for the application, created in the scope selected by `quadlet_podman_user` (rootful or the given user's rootless scope).<br><br>Existing secrets are left untouched by default (their value is neither compared nor […](#variable-quadlet_podman_secrets) |
+| `quadlet_podman_secrets` | `list` | No | `[]` | List of Podman secrets to manage for the application, created in the scope selected by `quadlet_podman_user` (rootful or the given user's rootless scope).<br><br>Declared secrets are authoritative for existence and content: the role compares the […](#variable-quadlet_podman_secrets) |
 | `quadlet_podman_registry_auth` | `list` | No | `[]` | List of container registries to log into before images are pulled, in the scope selected by `quadlet_podman_user`. Needed for images from private registries; the credentials are also used by the automatic image updates […](#variable-quadlet_podman_registry_auth) |
 | `quadlet_podman_directories` | `list` | No | `[]` | List of host directories to create before the application's services are started, typically used as bind-mount sources or to hold configuration created via `quadlet_podman_files`.<br><br>For rootless applications keep in mind that a container process […](#variable-quadlet_podman_directories) |
-| `quadlet_podman_files` | `list` | No | `[]` | List of files to manage for the application, e.g. environment files referenced via `EnvironmentFile` or configuration files bind-mounted into containers. Parent directories must exist (see `quadlet_podman_directories`).<br><br>Do not put secrets into […](#variable-quadlet_podman_files) |
+| `quadlet_podman_files` | `list` | No | `[]` | List of files to manage for the application, e.g. environment files referenced via `EnvironmentFile` or configuration files bind-mounted into containers. Declared files are owned by the application: content and attributes are enforced, a pre-existing […](#variable-quadlet_podman_files) |
 | `quadlet_podman_min_podman_version` | `str` | No | N/A | Minimum Podman version this application requires (e.g. `5.7.0` when using `artifact` units or Quadlet settings introduced after the role's own baseline). If the Podman version on the target host is lower, the role fails early with a clear message […](#variable-quadlet_podman_min_podman_version) |
 
 ### `quadlet_podman_app`<a id="variable-quadlet_podman_app"></a>
@@ -774,17 +773,23 @@ List of Podman secrets to manage for the application, created in the
 scope selected by `quadlet_podman_user` (rootful or the given user's
 rootless scope).
 
-Existing secrets are left untouched by default (their value is neither
-compared nor updated), so no secret data appears in diffs or logs. Set
-`force: true` on an item to rotate its value. Note that containers
-only pick up a rotated secret when they are recreated (a plain restart
-is not sufficient for `type=env` secrets).
+Declared secrets are authoritative for existence and content: the
+role compares the current value (read back internally, never logged
+or shown in diffs) and replaces the secret when it differs, so
+rotation is implicit; change the declared value and converge.
+Declaring a pre-existing secret adopts it: its value is reconciled
+to the declared one and de-listing it later removes it. A secret
+name belongs to exactly one application per scope; conflicting
+claims by another application's manifest are rejected. Podman
+copies secret data into containers at creation time, so a changed
+value also restarts the application services (their containers are
+recreated on start, which re-materializes the secret).
 
 Reference the secrets from Quadlet units via the `Secret` setting of
 the `Container` section, e.g.
 `Secret: "zammad_db_password,type=env,target=POSTGRES_PASSWORD"`.
 
-The role records the names of the secrets it created in a
+The role records the names of the secrets it manages in a
 per-application manifest (root-owned, below `/var/lib/ansible-podman-quadlet/`): secrets renamed or
 removed from this list get removed again on the next run, and
 `quadlet_podman_state: "absent"` removes all of the application's
@@ -831,25 +836,14 @@ failures when values come from files or lookups).
 
 [*⇑ Back to ToC ⇑*](#toc)
 
-`present` ensures the secret exists (without updating an existing
-one unless `force` is `true`), `absent` removes it.
+`present` ensures the secret exists with exactly the declared
+value (a differing existing secret is replaced and the
+application services are restarted), `absent` removes it.
 
 - **Type**: `str`
 - **Required**: No
 - **Default**: `"present"`
 - **Choices**: `present`, `absent`
-
-#### `quadlet_podman_secrets['force']`<a id="variable-quadlet_podman_secrets-sub-force"></a>
-
-[*⇑ Back to ToC ⇑*](#toc)
-
-If set to `true`, the secret is recreated on every run, updating
-its value (use for rotation). If `false` (the default), an
-existing secret is left untouched.
-
-- **Type**: `bool`
-- **Required**: No
-- **Default**: `false`
 
 
 

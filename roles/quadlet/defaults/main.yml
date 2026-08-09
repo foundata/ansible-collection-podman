@@ -371,17 +371,22 @@ quadlet_podman_unit_defaults: {}
 # selected by `quadlet_podman_user` (rootful or the given user's rootless
 # scope).
 #
-# Existing secrets are left untouched by default (their value is neither
-# compared nor updated), so no secret data appears in diffs or logs. Set
-# `force: true` on an item to rotate its value. Note that containers only pick
-# up a rotated secret when they are recreated (a plain restart is not sufficient
-# for `type=env` secrets).
+# Declared secrets are authoritative for existence and content: the role
+# compares the current value (read back internally, never logged or shown in
+# diffs) and replaces the secret when it differs, so rotation is implicit;
+# change the declared value and converge. Declaring a pre-existing secret adopts
+# it: its value is reconciled to the declared one and de-listing it later
+# removes it. A secret name belongs to exactly one application per scope;
+# conflicting claims by another application's manifest are rejected. Podman
+# copies secret data into containers at creation time, so a changed value also
+# restarts the application services (their containers are recreated on start,
+# which re-materializes the secret).
 #
 # Reference the secrets from Quadlet units via the `Secret` setting of the
 # `Container` section, e.g.
 # `Secret: "zammad_db_password,type=env,target=POSTGRES_PASSWORD"`.
 #
-# The role records the names of the secrets it created in a per-application
+# The role records the names of the secrets it manages in a per-application
 # manifest (root-owned, below `/var/lib/ansible-podman-quadlet/`): secrets
 # renamed or removed from this list get removed again on the next run, and
 # `quadlet_podman_state: "absent"` removes all of the application's secrets even
@@ -415,19 +420,13 @@ quadlet_podman_unit_defaults: {}
 #     - Required: No
 #     - Sensitive: Yes (no_log, values are masked in logs)
 #   - state:
-#     `present` ensures the secret exists (without updating an existing one
-#     unless `force` is `true`), `absent` removes it.
+#     `present` ensures the secret exists with exactly the declared value (a
+#     differing existing secret is replaced and the application services are
+#     restarted), `absent` removes it.
 #     - Type: str
 #     - Required: No
 #     - Default: present
 #     - Choices: present, absent
-#   - force:
-#     If set to `true`, the secret is recreated on every run, updating its value
-#     (use for rotation). If `false` (the default), an existing secret is left
-#     untouched.
-#     - Type: bool
-#     - Required: No
-#     - Default: false
 quadlet_podman_secrets: []
 
 

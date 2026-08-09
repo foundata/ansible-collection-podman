@@ -979,6 +979,206 @@
       persistent data.
 
 
+### Implicit secret rotation, exclusive ownership and Pod= validation
+### (self-contained "rotatest" application in the rootful scope)
+
+- name: "Molecule | Verify | quadlet | Rotation: deploy the rotatest application (secret value 1)"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "rotatest"
+    quadlet_podman_secrets:
+      - name: "rotatest_secret"
+        value: "molecule-rotate-1"
+    quadlet_podman_units:
+      - name: "rotatest"
+        type: "container"
+        sections:
+          Unit:
+            Description: "Molecule secret rotation container"
+          Container:
+            ContainerName: "rotatest"
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "top"
+            Secret: "rotatest_secret,type=env,target=ROTATEST_VALUE"
+          Install:
+            WantedBy:
+              - "multi-user.target"
+
+
+- name: "Molecule | Verify | quadlet | Rotation: read the container environment (value 1)"
+  ansible.builtin.command:
+    argv: ["podman", "exec", "rotatest", "env"]
+  register: __testing_quadlet_rotate_env1
+  changed_when:
+    - false
+
+
+# Implicit rotation: ONLY the declared value changes; the role has to detect
+# the difference, replace the secret and restart the service so the
+# recreated container sees the new value (regression: existing secrets were
+# never compared, a changed value silently did nothing without force).
+- name: "Molecule | Verify | quadlet | Rotation: converge again with a changed secret value"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "rotatest"
+    quadlet_podman_secrets:
+      - name: "rotatest_secret"
+        value: "molecule-rotate-2"
+    quadlet_podman_units:
+      - name: "rotatest"
+        type: "container"
+        sections:
+          Unit:
+            Description: "Molecule secret rotation container"
+          Container:
+            ContainerName: "rotatest"
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "top"
+            Secret: "rotatest_secret,type=env,target=ROTATEST_VALUE"
+          Install:
+            WantedBy:
+              - "multi-user.target"
+
+
+- name: "Molecule | Verify | quadlet | Rotation: read the container environment (value 2)"
+  ansible.builtin.command:
+    argv: ["podman", "exec", "rotatest", "env"]
+  register: __testing_quadlet_rotate_env2
+  changed_when:
+    - false
+
+
+- name: "Molecule | Verify | quadlet | Rotation: assert the rotated value reached the running container"
+  ansible.builtin.assert:
+    that:
+      - "'ROTATEST_VALUE=molecule-rotate-1' in __testing_quadlet_rotate_env1['stdout_lines']"
+      - "'ROTATEST_VALUE=molecule-rotate-2' in __testing_quadlet_rotate_env2['stdout_lines']"
+    fail_msg: >-
+      Implicit secret rotation failed: the container environment did not
+      follow the declared secret value
+      ({{ __testing_quadlet_rotate_env1['stdout_lines'] | ansible.builtin.select('ansible.builtin.match', '^ROTATEST_') | ansible.builtin.list }}
+      then
+      {{ __testing_quadlet_rotate_env2['stdout_lines'] | ansible.builtin.select('ansible.builtin.match', '^ROTATEST_') | ansible.builtin.list }}).
+    success_msg: "Changing the declared value rotated the secret and restarted the service."
+
+
+# Exclusive ownership: a second application claiming rotatest's secret has
+# to be rejected before anything is changed.
+- name: "Molecule | Verify | quadlet | Ownership: attempt to claim the secret from another application"
+  block:
+
+    - name: "Molecule | Verify | quadlet | Ownership: include the role as a conflicting application"
+      ansible.builtin.include_role:
+        name: "foundata.podman.quadlet"
+      vars:
+        quadlet_podman_app: "conflictapp"
+        quadlet_podman_secrets:
+          - name: "rotatest_secret"
+            value: "conflicting-value"
+
+    - name: "Molecule | Verify | quadlet | Ownership: record that the conflicting claim was accepted"
+      ansible.builtin.set_fact:
+        __testing_quadlet_conflict_rejected: false
+
+  rescue:
+
+    - name: "Molecule | Verify | quadlet | Ownership: record that the conflicting claim was rejected"
+      ansible.builtin.set_fact:
+        __testing_quadlet_conflict_rejected: true
+
+
+- name: "Molecule | Verify | quadlet | Ownership: read the container environment after the rejected claim"
+  ansible.builtin.command:
+    argv: ["podman", "exec", "rotatest", "env"]
+  register: __testing_quadlet_rotate_env3
+  changed_when:
+    - false
+
+
+- name: "Molecule | Verify | quadlet | Ownership: assert the conflicting claim was rejected and nothing changed"
+  ansible.builtin.assert:
+    that:
+      - __testing_quadlet_conflict_rejected | ansible.builtin.bool
+      - "'ROTATEST_VALUE=molecule-rotate-2' in __testing_quadlet_rotate_env3['stdout_lines']"
+    fail_msg: >-
+      A second application claiming an already-owned secret was not rejected
+      (or the rejected run still modified the secret).
+    success_msg: "Conflicting resource claims are rejected before any change."
+
+
+- name: "Molecule | Verify | quadlet | Rotation: remove the rotatest application again"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "rotatest"
+    quadlet_podman_state: "absent"
+
+
+- name: "Molecule | Verify | quadlet | Rotation: query the Podman secrets after removal"
+  ansible.builtin.command:
+    argv:
+      - "/usr/bin/podman"
+      - "secret"
+      - "ls"
+      - "--format"
+      - "{{ '{{.Name}}' }}"
+  register: __testing_quadlet_rotate_secrets_after
+  changed_when:
+    - false
+
+
+- name: "Molecule | Verify | quadlet | Rotation: assert the secret was removed with its application"
+  ansible.builtin.assert:
+    that:
+      - "'rotatest_secret' not in __testing_quadlet_rotate_secrets_after['stdout_lines']"
+    fail_msg: "state absent left the rotatest secret behind."
+    success_msg: "state absent removed the application's secret."
+
+
+# Pod= has to name the Quadlet FILE (with .pod suffix); a bare pod name
+# passes the generator's grammar check nowhere, so the role must reject it
+# during init, before any state is touched.
+- name: "Molecule | Verify | quadlet | Pod reference: attempt a bare pod name"
+  block:
+
+    - name: "Molecule | Verify | quadlet | Pod reference: include the role with a bare Pod value"
+      ansible.builtin.include_role:
+        name: "foundata.podman.quadlet"
+      vars:
+        quadlet_podman_app: "podtest"
+        quadlet_podman_units:
+          - name: "podmember"
+            type: "container"
+            sections:
+              Container:
+                ContainerName: "podmember"
+                Image: "quay.io/libpod/testimage:20241011"
+                Exec: "top"
+                Pod: "shared"
+
+    - name: "Molecule | Verify | quadlet | Pod reference: record that the bare name was accepted"
+      ansible.builtin.set_fact:
+        __testing_quadlet_barepod_rejected: false
+
+  rescue:
+
+    - name: "Molecule | Verify | quadlet | Pod reference: record that the bare name was rejected"
+      ansible.builtin.set_fact:
+        __testing_quadlet_barepod_rejected: true
+
+
+- name: "Molecule | Verify | quadlet | Pod reference: assert the bare pod name was rejected"
+  ansible.builtin.assert:
+    that:
+      - __testing_quadlet_barepod_rejected | ansible.builtin.bool
+    fail_msg: >-
+      A bare Pod value without the '.pod' suffix passed validation; Podman's
+      generator would reject the unit later.
+    success_msg: "Pod references without the '.pod' file suffix are rejected."
+
+
 - name: "Molecule | Verify | quadlet | Check the administrator's unit files survived the sweeps"
   ansible.builtin.stat:
     path: "{{ item }}"

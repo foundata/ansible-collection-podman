@@ -111,9 +111,121 @@
     - "quadlet_podman: restart application services"
 
 
-# Existing secrets stay untouched unless the item sets force (rotation); this
-# keeps runs idempotent and secret values out of diffs. See the
-# quadlet_podman_secrets documentation for the container recreation caveat.
+# The manifests of the other applications in this scope are needed twice:
+# for the exclusive-ownership check right below and for the registry logout
+# further down (shared authfile).
+- name: "Config | Default | Find the manifests of the other applications in this scope"
+  ansible.builtin.find:
+    paths: "{{ __quadlet_podman_manifest_dir_path }}"
+    patterns:
+      - "*.ansible-manifest"
+    file_type: "file"
+  register: __quadlet_podman_manifest_find
+
+
+- name: "Config | Default | Read the manifests of the other applications in this scope"
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  register: __quadlet_podman_other_manifests_slurp
+  loop: >-
+    {{
+      __quadlet_podman_manifest_find['files']
+      | ansible.builtin.map(attribute='path')
+      | ansible.builtin.reject('ansible.builtin.eq', __quadlet_podman_manifest_file_path)
+      | ansible.builtin.list
+    }}
+  loop_control:
+    label: "{{ item }}"
+
+
+# Resources are exclusively owned: declaration is authoritative for existence
+# and content, so two applications of one scope claiming the same secret name
+# or managed file would rewrite and delete each other's resources. Reject the
+# conflict before anything is changed (a shared credential can be declared
+# per application under different secret names with the same value).
+- name: "Config | Default | Check the declared secrets and files are not claimed by another application"
+  ansible.builtin.assert:
+    that:
+      - (__quadlet_podman_secret_conflicts | ansible.builtin.length) == 0
+      - (__quadlet_podman_file_conflicts | ansible.builtin.length) == 0
+    fail_msg: >-
+      Another application's manifest in this scope already records these
+      resources: secrets
+      [{{ __quadlet_podman_secret_conflicts | ansible.builtin.join(', ') }}],
+      files [{{ __quadlet_podman_file_conflicts | ansible.builtin.join(', ') }}].
+      Each secret name and managed file belongs to exactly one application.
+    quiet: true
+  vars:
+    __quadlet_podman_other_claims: >-
+      {%- set __ns = namespace(secrets=[], files=[]) -%}
+      {%- for __result in (__quadlet_podman_other_manifests_slurp['results'] | ansible.builtin.default([])) -%}
+      {%-   set __manifest = ((__result['content'] | ansible.builtin.default('') | ansible.builtin.b64decode
+                               | ansible.builtin.from_yaml) | ansible.builtin.default({}, true)) -%}
+      {%-   set __ns.secrets = __ns.secrets + (__manifest['secrets'] | ansible.builtin.default([])) -%}
+      {%-   set __ns.files = __ns.files + (__manifest['files'] | ansible.builtin.default([])) -%}
+      {%- endfor -%}
+      {{ {'secrets': __ns.secrets, 'files': __ns.files} }}
+    __quadlet_podman_secret_conflicts: >-
+      {{ __quadlet_podman_secret_names_declared | ansible.builtin.intersect(__quadlet_podman_other_claims['secrets']) }}
+    __quadlet_podman_file_conflicts: >-
+      {{ __quadlet_podman_file_dests_declared | ansible.builtin.intersect(__quadlet_podman_other_claims['files']) }}
+
+
+# Declared secrets are authoritative for existence AND content: the current
+# value is read back (never logged) and a secret is only recreated when its
+# value differs, keeping runs idempotent without exposing data. Rotation is
+# therefore implicit: change the declared value and converge. Podman copies
+# secret data into containers at creation time, so a changed secret also
+# restarts the application services (Quadlet services recreate their
+# containers on start, which re-materializes the secret).
+- name: "Config | Default | Inspect the current values of the application's Podman secrets"
+  ansible.builtin.command:
+    argv:
+      - "{{ __quadlet_podman_podman_exec_path }}"
+      - "secret"
+      - "inspect"
+      - "--showsecret"
+      - "--format"
+      - "{{ '{{.SecretData}}' }}"
+      - "{{ __quadlet_podman_secret_item['name'] }}"
+  become: true
+  become_user: "{{ __quadlet_podman_become_user }}"
+  environment: "{{ __quadlet_podman_task_environment }}"
+  register: __quadlet_podman_secret_current
+  changed_when:
+    - false
+  # a missing secret is the normal fresh case
+  failed_when:
+    - false
+  # read-only probe; run it under "--check" too so the comparison works there
+  check_mode: false
+  no_log: true # secret values must not be leaked into logs or diffs
+  when:
+    - (__quadlet_podman_secret_item['state'] | ansible.builtin.default('present')) == 'present'
+  loop: "{{ quadlet_podman_secrets }}"
+  loop_control:
+    loop_var: "__quadlet_podman_secret_item"
+
+
+- name: "Config | Default | Determine the Podman secrets needing an update"
+  ansible.builtin.set_fact:
+    # names only: the value comparison happens inside this task, nothing but
+    # the names leaves it
+    __quadlet_podman_secret_changed_names: >-
+      {%- set __ns = namespace(names=[]) -%}
+      {%- for __r in (__quadlet_podman_secret_current['results'] | ansible.builtin.default([])) -%}
+      {%-   if not (__r['skipped'] | ansible.builtin.default(false)) -%}
+      {%-     set __item = __r['__quadlet_podman_secret_item'] -%}
+      {%-     set __desired = (__item['value'] | ansible.builtin.default('')) | ansible.builtin.regex_replace('\n+$', '') -%}
+      {%-     if ((__r['rc'] | ansible.builtin.default(1)) != 0) or ((__r['stdout'] | ansible.builtin.default('')) != __desired) -%}
+      {%-       set _ = __ns.names.append(__item['name']) -%}
+      {%-     endif -%}
+      {%-   endif -%}
+      {%- endfor -%}
+      {{ __ns.names }}
+  no_log: true # the comparison input contains secret values
+
+
 - name: "Config | Default | Manage Podman secrets of the application"
   containers.podman.podman_secret:
     name: "{{ __quadlet_podman_secret_item['name'] }}"
@@ -121,16 +233,22 @@
     # failures when values come from files or lookups
     data: "{{ (__quadlet_podman_secret_item['value'] | ansible.builtin.default('')) | ansible.builtin.regex_replace('\\n+$', '') }}"
     state: "{{ __quadlet_podman_secret_item['state'] | ansible.builtin.default('present') }}"
-    force: "{{ __quadlet_podman_secret_item['force'] | ansible.builtin.default(false) }}"
-    skip_existing: "{{ not (__quadlet_podman_secret_item['force'] | ansible.builtin.default(false)) }}"
+    force: true
+    skip_existing: false
     executable: "{{ __quadlet_podman_podman_exec_path }}"
   become: true
   become_user: "{{ __quadlet_podman_become_user }}"
   environment: "{{ __quadlet_podman_task_environment }}"
+  when:
+    - >-
+      ((__quadlet_podman_secret_item['state'] | ansible.builtin.default('present')) == 'absent')
+      or (__quadlet_podman_secret_item['name'] in __quadlet_podman_secret_changed_names)
   loop: "{{ quadlet_podman_secrets }}"
   loop_control:
     loop_var: "__quadlet_podman_secret_item"
   no_log: true # secret values must not be leaked into logs or diffs
+  notify:
+    - "quadlet_podman: restart application services"
 
 
 # A persistent authfile is used instead of podman's runtime-directory default,
@@ -498,38 +616,12 @@
 
 
 # All applications of a scope share one authfile, so a logout for this
-# application would also cut off every other application still using the same
-# registry (until its next run re-creates the login). The manifests of the
-# other applications in this scope therefore decide which registries are
-# actually safe to log out of.
-- name: "Config | Default | Find the manifests of the other applications in this scope"
-  ansible.builtin.find:
-    paths: "{{ __quadlet_podman_manifest_dir_path }}"
-    patterns:
-      - "*.ansible-manifest"
-    file_type: "file"
-  register: __quadlet_podman_manifest_find
-
-
-- name: "Config | Default | Read the manifests of the other applications in this scope"
-  ansible.builtin.slurp:
-    src: "{{ item }}"
-  register: __quadlet_podman_other_manifests_slurp
-  loop: >-
-    {{
-      __quadlet_podman_manifest_find['files']
-      | ansible.builtin.map(attribute='path')
-      | ansible.builtin.reject('ansible.builtin.eq', __quadlet_podman_manifest_file_path)
-      | ansible.builtin.list
-    }}
-  loop_control:
-    label: "{{ item }}"
-
-
-# Removes the registry's credentials from the (per-scope, shared) authfile.
-# Registries that the manifest of another application in this scope still
-# declares are skipped: logging them out here would break that application's
-# image pulls until its next run.
+# application would also cut off every other application still using the
+# same registry (until its next run re-creates the login). Removes the
+# registry's credentials from the shared authfile; registries that the
+# manifest of another application (read further up) still declares are
+# skipped: logging them out here would break that application's image pulls
+# until its next run.
 - name: "Config | Default | Log out of container registries no longer declared"
   containers.podman.podman_logout:
     registry: "{{ __quadlet_podman_stale_registry }}"
