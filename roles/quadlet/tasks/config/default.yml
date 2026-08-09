@@ -35,6 +35,192 @@
       }}
 
 
+# The manifests of the other applications in this scope feed the
+# exclusive-ownership checks below (BEFORE anything is changed), the
+# stale-resource protection and the registry logout further down.
+- name: "Config | Default | Find the manifests of the other applications in this scope"
+  ansible.builtin.find:
+    paths: "{{ __quadlet_podman_manifest_dir_path }}"
+    patterns:
+      - "*.ansible-manifest"
+    file_type: "file"
+  register: __quadlet_podman_manifest_find
+
+
+- name: "Config | Default | Read the manifests of the other applications in this scope"
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  register: __quadlet_podman_other_manifests_slurp
+  loop: >-
+    {{
+      __quadlet_podman_manifest_find['files']
+      | ansible.builtin.map(attribute='path')
+      | ansible.builtin.reject('ansible.builtin.eq', __quadlet_podman_manifest_file_path)
+      | ansible.builtin.list
+    }}
+  loop_control:
+    label: "{{ item }}"
+
+
+# Resources are exclusively owned: declaration is authoritative for existence
+# and content, so two applications of one scope claiming the same secret name
+# or managed file would rewrite and delete each other's resources. Reject the
+# conflict before anything is changed (a shared credential can be declared
+# per application under different secret names with the same value).
+- name: "Config | Default | Determine the resources claimed by the other applications"
+  ansible.builtin.set_fact:
+    __quadlet_podman_other_claims_now: >-
+      {%- set __ns = namespace(secrets=[], files=[], units=[], services=[]) -%}
+      {%- for __result in (__quadlet_podman_other_manifests_slurp['results'] | ansible.builtin.default([])) -%}
+      {%-   set __manifest = ((__result['content'] | ansible.builtin.default('') | ansible.builtin.b64decode
+                               | ansible.builtin.from_yaml) | ansible.builtin.default({}, true)) -%}
+      {%-   set __ns.secrets = __ns.secrets + (__manifest['secrets'] | ansible.builtin.default([])) -%}
+      {%-   set __ns.files = __ns.files + (__manifest['files'] | ansible.builtin.default([])) -%}
+      {%-   set __ns.units = __ns.units + (__manifest['units'] | ansible.builtin.default([])) -%}
+      {%-   set __ns.services = __ns.services + (__manifest['services'] | ansible.builtin.default([])) -%}
+      {%- endfor -%}
+      {{ {'secrets': __ns.secrets, 'files': __ns.files, 'units': __ns.units, 'services': __ns.services} }}
+
+
+- name: "Config | Default | Check the declared secrets and files are not claimed by another application"
+  ansible.builtin.assert:
+    that:
+      - (__quadlet_podman_secret_conflicts | ansible.builtin.length) == 0
+      - (__quadlet_podman_file_conflicts | ansible.builtin.length) == 0
+      - (__quadlet_podman_unit_conflicts | ansible.builtin.length) == 0
+      - (__quadlet_podman_service_conflicts | ansible.builtin.length) == 0
+    fail_msg: >-
+      Another application's manifest in this scope already records these
+      resources: secrets
+      [{{ __quadlet_podman_secret_conflicts | ansible.builtin.join(', ') }}],
+      files [{{ __quadlet_podman_file_conflicts | ansible.builtin.join(', ') }}],
+      unit files [{{ __quadlet_podman_unit_conflicts | ansible.builtin.join(', ') }}],
+      services [{{ __quadlet_podman_service_conflicts | ansible.builtin.join(', ') }}].
+      Unit file names and generated service names share one scope-wide
+      systemd namespace; each resource belongs to exactly one application.
+    quiet: true
+  vars:
+    __quadlet_podman_secret_conflicts: >-
+      {{ __quadlet_podman_secret_names_declared | ansible.builtin.intersect(__quadlet_podman_other_claims_now['secrets']) }}
+    __quadlet_podman_file_conflicts: >-
+      {{ __quadlet_podman_file_dests_declared | ansible.builtin.intersect(__quadlet_podman_other_claims_now['files']) }}
+    __quadlet_podman_unit_conflicts: >-
+      {{
+        ((__quadlet_podman_units_effective | ansible.builtin.map(attribute='filename') | ansible.builtin.list)
+         + (__quadlet_podman_systemd_units_effective | ansible.builtin.map(attribute='name') | ansible.builtin.list))
+        | ansible.builtin.intersect(__quadlet_podman_other_claims_now['units'])
+      }}
+    __quadlet_podman_service_conflicts: >-
+      {{
+        ((__quadlet_podman_units_effective | ansible.builtin.map(attribute='service') | ansible.builtin.list)
+         + (__quadlet_podman_systemd_units_effective | ansible.builtin.map(attribute='name') | ansible.builtin.list))
+        | ansible.builtin.intersect(__quadlet_podman_other_claims_now['services'])
+      }}
+
+
+# An omitted value or content is almost always an oversight; it would
+# silently become an empty secret or file. Intentionally empty declarations
+# stay possible with an explicit empty string.
+- name: "Config | Default | Check the resource items declare their payload"
+  ansible.builtin.assert:
+    that:
+      - >-
+        quadlet_podman_secrets
+        | ansible.builtin.selectattr('state', 'ansible.builtin.undefined')
+        | ansible.builtin.selectattr('value', 'ansible.builtin.undefined')
+        | ansible.builtin.length == 0
+      - >-
+        quadlet_podman_secrets
+        | ansible.builtin.selectattr('state', 'ansible.builtin.defined')
+        | ansible.builtin.selectattr('state', 'ansible.builtin.equalto', 'present')
+        | ansible.builtin.selectattr('value', 'ansible.builtin.undefined')
+        | ansible.builtin.length == 0
+      - >-
+        quadlet_podman_files
+        | ansible.builtin.selectattr('state', 'ansible.builtin.undefined')
+        | ansible.builtin.selectattr('content', 'ansible.builtin.undefined')
+        | ansible.builtin.length == 0
+      - >-
+        quadlet_podman_files
+        | ansible.builtin.selectattr('state', 'ansible.builtin.defined')
+        | ansible.builtin.selectattr('state', 'ansible.builtin.equalto', 'present')
+        | ansible.builtin.selectattr('content', 'ansible.builtin.undefined')
+        | ansible.builtin.length == 0
+    fail_msg: >-
+      Invalid input: every quadlet_podman_secrets item with state "present"
+      needs a "value" and every quadlet_podman_files item with state
+      "present" needs a "content" (an explicit empty string is fine); only
+      state "absent" items may omit them.
+    quiet: true
+
+
+# The shared unit directories are a scope-wide namespace: a destination that
+# already exists is only written when it carries THIS application's marker.
+# Files marked for another application and unmarked files (an administrator's
+# unit of the same name) are rejected, matching the documented promise that
+# such files are never touched.
+- name: "Config | Default | Determine the state of the declared unit file destinations"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: __quadlet_podman_unit_dest_stat
+  loop: >-
+    {{
+      (__quadlet_podman_units_effective | ansible.builtin.map(attribute='filename')
+       | ansible.builtin.map('ansible.builtin.regex_replace', '^', __quadlet_podman_unit_dir_path ~ '/') | ansible.builtin.list)
+      + (__quadlet_podman_systemd_units_effective | ansible.builtin.map(attribute='name')
+         | ansible.builtin.map('ansible.builtin.regex_replace', '^', __quadlet_podman_systemd_unit_dir_path ~ '/') | ansible.builtin.list)
+    }}
+  loop_control:
+    label: "{{ item }}"
+
+
+- name: "Config | Default | Determine which existing destinations this application owns"
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [__quadlet_podman_grep_exec_path, '-l', '-s', '-x', '-F', '--', __quadlet_podman_file_marker]
+        + __quadlet_podman_unit_dest_existing
+      }}
+  register: __quadlet_podman_unit_dest_owned_result
+  changed_when: false
+  # read-only probe; run it under "--check" too
+  check_mode: false
+  failed_when:
+    - __quadlet_podman_unit_dest_owned_result['rc'] not in [0, 1, 2]
+  vars:
+    __quadlet_podman_unit_dest_existing: >-
+      {{
+        __quadlet_podman_unit_dest_stat['results'] | ansible.builtin.default([])
+        | ansible.builtin.selectattr('stat.exists')
+        | ansible.builtin.map(attribute='item') | ansible.builtin.list
+      }}
+  when:
+    - (__quadlet_podman_unit_dest_existing | ansible.builtin.length) > 0
+
+
+- name: "Config | Default | Check the existing destinations belong to this application"
+  ansible.builtin.assert:
+    that:
+      - (__quadlet_podman_unit_dest_foreign | ansible.builtin.length) == 0
+    fail_msg: >-
+      Refusing to overwrite existing unit file(s) not owned by this
+      application:
+      [{{ __quadlet_podman_unit_dest_foreign | ansible.builtin.join(', ') }}].
+      They belong to another application or an administrator; rename the
+      declared unit(s) or remove the existing file(s).
+    quiet: true
+  vars:
+    __quadlet_podman_unit_dest_foreign: >-
+      {{
+        __quadlet_podman_unit_dest_stat['results'] | ansible.builtin.default([])
+        | ansible.builtin.selectattr('stat.exists')
+        | ansible.builtin.map(attribute='item')
+        | ansible.builtin.reject('ansible.builtin.in',
+            __quadlet_podman_unit_dest_owned_result['stdout_lines'] | ansible.builtin.default([]))
+        | ansible.builtin.list
+      }}
+
+
 - name: "Config | Default | Ensure the user configuration directory exists (rootless)"
   ansible.builtin.file:
     path: "{{ __quadlet_podman_user_home }}/{{ item }}"

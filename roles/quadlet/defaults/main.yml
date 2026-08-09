@@ -430,9 +430,10 @@ quadlet_podman_unit_defaults: {}
 #     - Type: str
 #     - Required: Yes
 #   - value:
-#     Value of the secret. Required when `state` is `present`. Trailing newlines
-#     are stripped (a common source of subtle authentication failures when
-#     values come from files or lookups).
+#     Value of the secret. Required when `state` is `present` (the role rejects
+#     a present item without it; an explicit empty string is a valid
+#     declaration). Trailing newlines are stripped (a common source of subtle
+#     authentication failures when values come from files or lookups).
 #     - Type: str
 #     - Required: No
 #     - Sensitive: Yes (no_log, values are masked in logs)

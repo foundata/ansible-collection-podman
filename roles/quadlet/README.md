@@ -844,9 +844,11 @@ Name of the Podman secret. Allowed characters: letters, digits,
 
 [*⇑ Back to ToC ⇑*](#toc)
 
-Value of the secret. Required when `state` is `present`. Trailing
-newlines are stripped (a common source of subtle authentication
-failures when values come from files or lookups).
+Value of the secret. Required when `state` is `present` (the
+role rejects a present item without it; an explicit empty
+string is a valid declaration). Trailing newlines are stripped
+(a common source of subtle authentication failures when values
+come from files or lookups).
 
 - **Type**: `str`
 - **Required**: No
@@ -1071,6 +1073,9 @@ Absolute path of the file.
 [*⇑ Back to ToC ⇑*](#toc)
 
 Content of the file. Required when `state` is `present`.
+Required when `state` is `present` (the role rejects a present
+item without it; an explicit empty string is a valid
+declaration).
 
 - **Type**: `str`
 - **Required**: No

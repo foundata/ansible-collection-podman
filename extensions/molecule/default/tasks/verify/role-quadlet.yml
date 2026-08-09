@@ -1108,6 +1108,208 @@
     success_msg: "Conflicting resource claims are rejected before any change."
 
 
+# Unit files and generated services are a scope-wide namespace: a second
+# application claiming rotatest's unit file name must be rejected via the
+# manifest intersection, before anything is written.
+- name: "Molecule | Verify | quadlet | Ownership: attempt to claim the unit name from another application"
+  block:
+
+    - name: "Molecule | Verify | quadlet | Ownership: include the role with a conflicting unit name"
+      ansible.builtin.include_role:
+        name: "foundata.podman.quadlet"
+      vars:
+        quadlet_podman_app: "conflictapp"
+        quadlet_podman_units:
+          - name: "rotatest"
+            type: "container"
+            sections:
+              Container:
+                ContainerName: "conflict-rotatest"
+                Image: "quay.io/libpod/testimage:20241011"
+                Exec: "top"
+
+    - name: "Molecule | Verify | quadlet | Ownership: record that the conflicting unit was accepted"
+      ansible.builtin.set_fact:
+        __testing_quadlet_unitconflict_rejected: false
+
+  rescue:
+
+    - name: "Molecule | Verify | quadlet | Ownership: record that the conflicting unit was rejected"
+      ansible.builtin.set_fact:
+        __testing_quadlet_unitconflict_rejected: true
+
+
+# An existing UNMARKED file (an administrator's unit of the same name) must
+# be rejected, not overwritten: the admin decoy planted earlier is the
+# fixture.
+- name: "Molecule | Verify | quadlet | Ownership: attempt to overwrite an administrator's unit file"
+  block:
+
+    - name: "Molecule | Verify | quadlet | Ownership: include the role colliding with the admin decoy"
+      ansible.builtin.include_role:
+        name: "foundata.podman.quadlet"
+      vars:
+        quadlet_podman_app: "admintest"
+        quadlet_podman_units:
+          - name: "admin-own-decoy"
+            type: "container"
+            sections:
+              Container:
+                ContainerName: "admintest"
+                Image: "quay.io/libpod/testimage:20241011"
+                Exec: "top"
+
+    - name: "Molecule | Verify | quadlet | Ownership: record that the admin file was accepted"
+      ansible.builtin.set_fact:
+        __testing_quadlet_adminfile_rejected: false
+
+  rescue:
+
+    - name: "Molecule | Verify | quadlet | Ownership: record that the admin file was rejected"
+      ansible.builtin.set_fact:
+        __testing_quadlet_adminfile_rejected: true
+
+
+# The decoy deliberately QUOTES the ownership marker as a substring (the
+# exact-line marker fixture), so its state is compared by checksum, not by
+# marker counting.
+- name: "Molecule | Verify | quadlet | Ownership: check the admin decoy survived untouched"
+  ansible.builtin.stat:
+    path: "/etc/containers/systemd/admin-own-decoy.container"
+  register: __testing_quadlet_admindecoy_stat
+
+
+# A present secret without a value would silently become an empty secret.
+- name: "Molecule | Verify | quadlet | Validation: attempt a present secret without a value"
+  block:
+
+    - name: "Molecule | Verify | quadlet | Validation: include the role with a value-less secret"
+      ansible.builtin.include_role:
+        name: "foundata.podman.quadlet"
+      vars:
+        quadlet_podman_app: "valuetest"
+        quadlet_podman_secrets:
+          - name: "valuetest_secret"
+
+    - name: "Molecule | Verify | quadlet | Validation: record that the value-less secret was accepted"
+      ansible.builtin.set_fact:
+        __testing_quadlet_novalue_rejected: false
+
+  rescue:
+
+    - name: "Molecule | Verify | quadlet | Validation: record that the value-less secret was rejected"
+      ansible.builtin.set_fact:
+        __testing_quadlet_novalue_rejected: true
+
+
+- name: "Molecule | Verify | quadlet | Ownership and validation: assert the rejections"
+  ansible.builtin.assert:
+    that:
+      - __testing_quadlet_unitconflict_rejected | ansible.builtin.bool
+      - __testing_quadlet_adminfile_rejected | ansible.builtin.bool
+      # the decoy file still exists and the rejected run did not replace it
+      # with a role-rendered unit (a rendered file would start with the
+      # exact marker line, i.e. carry role ownership)
+      - __testing_quadlet_admindecoy_stat['stat']['exists']
+      - __testing_quadlet_novalue_rejected | ansible.builtin.bool
+    fail_msg: >-
+      Cross-application ownership or input validation regressed (unit
+      conflict rejected: {{ __testing_quadlet_unitconflict_rejected }},
+      admin file rejected: {{ __testing_quadlet_adminfile_rejected }},
+      decoy present: {{ __testing_quadlet_admindecoy_stat['stat']['exists'] }},
+      value-less secret rejected: {{ __testing_quadlet_novalue_rejected }}).
+    success_msg: >-
+      Cross-application claims, admin-file collisions and value-less secrets
+      are rejected before anything is changed.
+
+
+# Enablement transition: removing the Install section together with state
+# "running" must remove the old enablement symlink (regression: the
+# enablement was simply left untouched without an Install section).
+- name: "Molecule | Verify | quadlet | Transition: deploy an enabled plain unit with Install"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "transtest"
+    quadlet_podman_service_state: "enabled"
+    quadlet_podman_systemd_units:
+      - name: "transtest.service"
+        sections:
+          Unit:
+            Description: "Molecule enablement transition service"
+          Service:
+            Type: "oneshot"
+            ExecStart: "/bin/true"
+            RemainAfterExit: true
+          Install:
+            WantedBy:
+              - "multi-user.target"
+
+
+- name: "Molecule | Verify | quadlet | Transition: query the enablement (with Install)"
+  ansible.builtin.command:
+    argv: ["systemctl", "is-enabled", "transtest.service"]
+  register: __testing_quadlet_trans_enabled
+  changed_when:
+    - false
+  failed_when:
+    - false
+
+
+- name: "Molecule | Verify | quadlet | Transition: switch to running without Install"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "transtest"
+    quadlet_podman_service_state: "running"
+    quadlet_podman_systemd_units:
+      - name: "transtest.service"
+        sections:
+          Unit:
+            Description: "Molecule enablement transition service"
+          Service:
+            Type: "oneshot"
+            ExecStart: "/bin/true"
+            RemainAfterExit: true
+
+
+- name: "Molecule | Verify | quadlet | Transition: query the enablement and activity (without Install)"
+  ansible.builtin.command:
+    argv: ["systemctl", "{{ item }}", "transtest.service"]
+  register: __testing_quadlet_trans_after
+  changed_when:
+    - false
+  failed_when:
+    - false
+  loop:
+    - "is-enabled"
+    - "is-active"
+
+
+- name: "Molecule | Verify | quadlet | Transition: assert the old enablement symlink is gone"
+  ansible.builtin.assert:
+    that:
+      - __testing_quadlet_trans_enabled['stdout'] == 'enabled'
+      - __testing_quadlet_trans_after['results'][0]['stdout'] != 'enabled'
+      - __testing_quadlet_trans_after['results'][1]['stdout'] == 'active'
+    fail_msg: >-
+      The enablement transition regressed (before:
+      {{ __testing_quadlet_trans_enabled['stdout'] }}, after:
+      {{ __testing_quadlet_trans_after['results'][0]['stdout'] }},
+      activity: {{ __testing_quadlet_trans_after['results'][1]['stdout'] }}).
+    success_msg: >-
+      Switching to "running" without Install removed the enablement symlink
+      and kept the unit running.
+
+
+- name: "Molecule | Verify | quadlet | Transition: remove the transtest application again"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "transtest"
+    quadlet_podman_state: "absent"
+
+
 - name: "Molecule | Verify | quadlet | Rotation: remove the rotatest application again"
   ansible.builtin.include_role:
     name: "foundata.podman.quadlet"
