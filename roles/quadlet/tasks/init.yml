@@ -154,6 +154,38 @@
     quiet: true
 
 
+# Duplicate resource declarations are almost always a copy-paste error and,
+# combined with per-item state values, make the outcome order-dependent (one
+# entry creating what another one deletes). Unit names are checked above;
+# this covers the remaining item lists. File and directory paths share one
+# namespace: the same path declared in both lists is contradictory, too.
+- name: "Init | Check the application resource lists for duplicates"
+  ansible.builtin.assert:
+    that:
+      - >-
+        (((quadlet_podman_files | ansible.builtin.map(attribute='dest') | ansible.builtin.list)
+          + (quadlet_podman_directories | ansible.builtin.map(attribute='path') | ansible.builtin.list))
+         | ansible.builtin.length)
+        ==
+        (((quadlet_podman_files | ansible.builtin.map(attribute='dest') | ansible.builtin.list)
+          + (quadlet_podman_directories | ansible.builtin.map(attribute='path') | ansible.builtin.list))
+         | ansible.builtin.unique | ansible.builtin.length)
+      - >-
+        (quadlet_podman_secrets | ansible.builtin.map(attribute='name') | ansible.builtin.length)
+        ==
+        (quadlet_podman_secrets | ansible.builtin.map(attribute='name') | ansible.builtin.unique | ansible.builtin.length)
+      - >-
+        (quadlet_podman_registry_auth | ansible.builtin.map(attribute='registry') | ansible.builtin.length)
+        ==
+        (quadlet_podman_registry_auth | ansible.builtin.map(attribute='registry') | ansible.builtin.unique | ansible.builtin.length)
+    fail_msg: >-
+      Invalid input: destinations in quadlet_podman_files and paths in
+      quadlet_podman_directories (shared namespace, checked across both lists), names in
+      quadlet_podman_secrets and registries in quadlet_podman_registry_auth must
+      be unique. Duplicate declarations make the outcome order-dependent.
+    quiet: true
+
+
 # The merge result gets pruned: a null section or setting drops that entry
 # entirely, so units can unset something inherited from
 # quadlet_podman_unit_defaults (e.g. Install on a timer-triggered unit).
