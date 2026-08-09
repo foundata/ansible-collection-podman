@@ -211,18 +211,63 @@
       {%-       endif -%}
       {%-     endif -%}
       {%-   endfor -%}
+      {#-   "managed" (the application-wide service state applies): always
+            for the service-relevant workload types - the documented global
+            semantics promise that "running" starts and "disabled" stops
+            them even without an Install section. The dependency-only types
+            (volume, network, image, build, artifact) start on demand as
+            dependencies and are only managed when a unit opts in via
+            Install or an explicit per-unit service_state. -#}
+      {#-   Quadlet's ServiceName= (in the type section) overrides the
+            generated service name; the role's service management, dependency
+            expansion and cleanup have to follow it. -#}
+      {%-   set __service_override = __sns.sections.get(__type | ansible.builtin.capitalize, {}).get('ServiceName') -%}
       {%-   set _ = __ns.units.append({
               'name': __u['name'],
               'type': __type,
               'filename': __u['name'] ~ '.' ~ __type,
-              'service': __u['name'] ~ __quadlet_podman_service_suffix_map[__type] ~ '.service',
+              'service': ((__service_override ~ '.service')
+                          if __service_override
+                          else (__u['name'] ~ __quadlet_podman_service_suffix_map[__type] ~ '.service')),
               'sections': __sns.sections,
               'has_install': ('Install' in __sns.sections),
               'service_state': __u['service_state'] | ansible.builtin.default(quadlet_podman_service_state),
-              'managed': ('Install' in __sns.sections) or (__u['service_state'] is ansible.builtin.defined),
+              'managed': (__type in ['container', 'pod', 'kube'])
+                         or ('Install' in __sns.sections)
+                         or (__u['service_state'] is ansible.builtin.defined),
             }) -%}
       {%- endfor -%}
       {{ __ns.units }}
+
+
+# ServiceName= overrides make service-name collisions possible that the
+# unit-name uniqueness check above cannot see (two units resolving to the
+# same service, an override colliding with a derived name, or a value that
+# already carries a .service suffix and would generate name.service.service).
+- name: "Init | Check the effective service names for validity and uniqueness"
+  ansible.builtin.assert:
+    that:
+      - >-
+        (__quadlet_podman_units_effective | ansible.builtin.map(attribute='service') | ansible.builtin.length)
+        ==
+        (__quadlet_podman_units_effective | ansible.builtin.map(attribute='service') | ansible.builtin.unique | ansible.builtin.length)
+      - >-
+        __quadlet_podman_units_effective
+        | ansible.builtin.map(attribute='service')
+        | ansible.builtin.reject('ansible.builtin.match', '^[A-Za-z0-9_.-]+\.service$')
+        | ansible.builtin.length == 0
+      - >-
+        __quadlet_podman_units_effective
+        | ansible.builtin.map(attribute='service')
+        | ansible.builtin.select('ansible.builtin.search', '\.service\.service$')
+        | ansible.builtin.length == 0
+    fail_msg: >-
+      Invalid input: the effective systemd service names of quadlet_podman_units
+      ({{ __quadlet_podman_units_effective | ansible.builtin.map(attribute='service') | ansible.builtin.join(', ') }})
+      must be unique, contain only characters from 'A-Za-z0-9_.-' and a
+      ServiceName setting must not itself end in '.service' (the suffix is
+      appended automatically).
+    quiet: true
 
 
 - name: "Init | Build the unit name to generated service name map"

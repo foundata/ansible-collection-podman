@@ -996,7 +996,11 @@ including its content. Handle with care.
 
 List of files to manage for the application, e.g. environment files
 referenced via `EnvironmentFile` or configuration files bind-mounted
-into containers. Parent directories must exist (see
+into containers. Declared files are owned by the application:
+content and attributes are enforced, a pre-existing file is adopted,
+and de-listing (or `quadlet_podman_state: "absent"`) removes it. A
+managed file belongs to exactly one application per scope;
+conflicting claims by another application's manifest are rejected. Parent directories must exist (see
 `quadlet_podman_directories`).
 
 Do not put secrets into environment or configuration files if it can

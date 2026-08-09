@@ -4,10 +4,13 @@
 
 # The services managed here are the systemd units the Quadlet generator
 # creates from the application's unit files, plus the plain systemd units of
-# the application (quadlet_podman_systemd_units). A Quadlet unit is managed
-# when it carries an Install section (volumes, networks and images without
-# one start on demand as dependencies) or an explicit per-unit service_state;
-# the effective per-unit service_state (falling back to
+# the application (quadlet_podman_systemd_units). The workload types
+# (container, pod, kube) are always managed, as the documented global
+# semantics demand ("running" starts and "disabled" stops them even without
+# an Install section); the dependency-only types (volume, network, image,
+# build, artifact) start on demand as dependencies and are only managed when
+# they carry an Install section or an explicit per-unit service_state. The
+# effective per-unit service_state (falling back to
 # quadlet_podman_service_state) then decides what happens. Start order: pods
 # first (member containers find their pod service on start), stop order
 # reversed, plain units last (e.g. timers start after the application).

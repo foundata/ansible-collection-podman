@@ -240,6 +240,42 @@
     - (__quadlet_podman_stale_candidates | ansible.builtin.length) > 0
 
 
+# The generated service name normally derives from the unit file name, but
+# a ServiceName= setting inside the file overrides it; the files still exist
+# here and are the authoritative source (same mechanism as in the uninstall
+# flow).
+- name: "Config | Default | Read the stale unit files (service name resolution)"
+  ansible.builtin.slurp:
+    src: "{{ __quadlet_podman_stale_path }}"
+  register: __quadlet_podman_stale_slurp
+  loop: "{{ __quadlet_podman_stale_result['stdout_lines'] | ansible.builtin.default([]) }}"
+  loop_control:
+    loop_var: "__quadlet_podman_stale_path"
+    label: "{{ __quadlet_podman_stale_path }}"
+
+
+- name: "Config | Default | Map the stale unit files to their generated service names"
+  ansible.builtin.set_fact:
+    __quadlet_podman_stale_service_map: >-
+      {%- set __ns = namespace(map={}) -%}
+      {%- for __r in (__quadlet_podman_stale_slurp['results'] | ansible.builtin.default([])) -%}
+      {%-   set __path = __r['__quadlet_podman_stale_path'] -%}
+      {%-   set __stem = __path | ansible.builtin.basename | ansible.builtin.splitext | ansible.builtin.first -%}
+      {%-   set __ext = __path | ansible.builtin.basename | ansible.builtin.splitext | ansible.builtin.last | ansible.builtin.regex_replace('^\.', '') -%}
+      {#-   no capture-group argument on purpose: '\1' as a Jinja string
+            literal is an octal escape (control character), which
+            regex_search rejects as "Unknown argument" -#}
+      {%-   set __line = (__r['content'] | ansible.builtin.default('') | ansible.builtin.b64decode)
+                         | ansible.builtin.regex_search('(?m)^\s*ServiceName\s*=\s*\S+\s*$') -%}
+      {%-   set __override = (__line.split('=', 1) | ansible.builtin.last | ansible.builtin.trim) if __line else '' -%}
+      {%-   set __service = (__override ~ '.service')
+                            if ((__override | ansible.builtin.length) > 0)
+                            else (__stem ~ (__quadlet_podman_service_suffix_map[__ext] | ansible.builtin.default('')) ~ '.service') -%}
+      {%-   set _ = __ns.map.update({__path: __service}) -%}
+      {%- endfor -%}
+      {{ __ns.map }}
+
+
 - name: "Config | Default | Stop the services of stale unit files"
   ansible.builtin.systemd_service:
     name: "{{ __quadlet_podman_stale_service }}"
@@ -249,16 +285,7 @@
   become_user: "{{ __quadlet_podman_become_user }}"
   environment: "{{ __quadlet_podman_task_environment }}"
   vars:
-    __quadlet_podman_stale_stem: "{{ __quadlet_podman_stale_path | ansible.builtin.basename | ansible.builtin.splitext | ansible.builtin.first }}"
-    __quadlet_podman_stale_ext: >-
-      {{
-        __quadlet_podman_stale_path
-        | ansible.builtin.basename
-        | ansible.builtin.splitext
-        | ansible.builtin.last
-        | ansible.builtin.regex_replace('^\.', '')
-      }}
-    __quadlet_podman_stale_service: "{{ __quadlet_podman_stale_stem }}{{ __quadlet_podman_service_suffix_map[__quadlet_podman_stale_ext] }}.service"
+    __quadlet_podman_stale_service: "{{ __quadlet_podman_stale_service_map[__quadlet_podman_stale_path] }}"
   # tolerate services that are not loaded (unit was never started or the
   # generator rejected it)
   failed_when: false
@@ -284,16 +311,7 @@
   become_user: "{{ __quadlet_podman_become_user }}"
   environment: "{{ __quadlet_podman_task_environment }}"
   vars:
-    __quadlet_podman_stale_stem: "{{ __quadlet_podman_stale_path | ansible.builtin.basename | ansible.builtin.splitext | ansible.builtin.first }}"
-    __quadlet_podman_stale_ext: >-
-      {{
-        __quadlet_podman_stale_path
-        | ansible.builtin.basename
-        | ansible.builtin.splitext
-        | ansible.builtin.last
-        | ansible.builtin.regex_replace('^\.', '')
-      }}
-    __quadlet_podman_stale_service: "{{ __quadlet_podman_stale_stem }}{{ __quadlet_podman_service_suffix_map[__quadlet_podman_stale_ext] }}.service"
+    __quadlet_podman_stale_service: "{{ __quadlet_podman_stale_service_map[__quadlet_podman_stale_path] }}"
   changed_when: false
   # tolerate services systemd does not know (unit was never started)
   failed_when: false
@@ -593,6 +611,8 @@
     path: "{{ __quadlet_podman_manifest_file_path }}"
     state: "absent"
   when:
+    - (quadlet_podman_units | ansible.builtin.length) == 0
+    - (quadlet_podman_systemd_units | ansible.builtin.length) == 0
     - (__quadlet_podman_secret_names_declared | ansible.builtin.length) == 0
     - (__quadlet_podman_file_dests_declared | ansible.builtin.length) == 0
     - (__quadlet_podman_registries_declared | ansible.builtin.length) == 0

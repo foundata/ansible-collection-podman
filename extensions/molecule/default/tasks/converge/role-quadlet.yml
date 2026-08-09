@@ -28,6 +28,23 @@
         sections:
           Volume:
             VolumeName: "webtest-data"
+      # ServiceName override: Quadlet names this unit's service
+      # webtest-alias.service instead of the derived svctest.service; the
+      # role's service management and cleanup have to follow the override
+      # (regression: they targeted the derived name and missed the service).
+      # NO Install section on purpose: the application-wide service state
+      # must start workload units anyway (regression: units without Install
+      # were silently ignored by the global state).
+      - name: "svctest"
+        type: "container"
+        sections:
+          Unit:
+            Description: "Molecule ServiceName override container"
+          Container:
+            ContainerName: "svctest"
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "top"
+            ServiceName: "webtest-alias"
       - name: "webtest"
         type: "container"
         sections:

@@ -27,6 +27,33 @@
     __testing_quadlet_webtest_unit_content: "{{ __testing_quadlet_webtest_unit_slurp['content'] | ansible.builtin.b64decode }}"
 
 
+## ServiceName override ("svctest" unit, service "webtest-alias.service")
+
+- name: "Molecule | Verify | quadlet | Query the state of the overridden and the derived service name"
+  ansible.builtin.command:
+    argv: ["systemctl", "is-active", "{{ item }}"]
+  register: __testing_quadlet_svcname_state
+  changed_when:
+    - false
+  failed_when:
+    - false
+  loop:
+    - "webtest-alias.service"
+    - "svctest.service"
+
+
+- name: "Molecule | Verify | quadlet | Assert the service runs under the overridden name only"
+  ansible.builtin.assert:
+    that:
+      - __testing_quadlet_svcname_state['results'][0]['stdout'] == 'active'
+      - __testing_quadlet_svcname_state['results'][1]['stdout'] != 'active'
+    fail_msg: >-
+      ServiceName override not honored:
+      webtest-alias.service={{ __testing_quadlet_svcname_state['results'][0]['stdout'] }},
+      svctest.service={{ __testing_quadlet_svcname_state['results'][1]['stdout'] }}.
+    success_msg: "The unit runs as webtest-alias.service, as its ServiceName demands."
+
+
 # The quoting must survive the whole chain (unit file -> Quadlet generator
 # -> podman --env -> container): the variable has to arrive with both words.
 - name: "Molecule | Verify | quadlet | Read the environment of the running webtest container"
@@ -906,12 +933,23 @@
   changed_when: false
 
 
+- name: "Molecule | Verify | quadlet | Absent: query the ServiceName-overridden service"
+  ansible.builtin.command:
+    argv: ["systemctl", "is-active", "webtest-alias.service"]
+  register: __testing_quadlet_absent_alias
+  changed_when:
+    - false
+  failed_when:
+    - false
+
+
 - name: "Molecule | Verify | quadlet | Absent: check the remaining artifacts"
   ansible.builtin.stat:
     path: "{{ item }}"
   register: __testing_quadlet_absent_stat
   loop:
     - "/etc/containers/systemd/webtest.container"
+    - "/etc/containers/systemd/svctest.container"
     - "/etc/containers/systemd/webtest-data.volume"
     - "/var/lib/ansible-podman-quadlet/system/webtest.ansible-manifest"
     - "/var/lib/webtest/app.env"
@@ -926,9 +964,12 @@
       - not __testing_quadlet_absent_stat['results'][1]['stat']['exists']
       - not __testing_quadlet_absent_stat['results'][2]['stat']['exists']
       - not __testing_quadlet_absent_stat['results'][3]['stat']['exists']
+      - not __testing_quadlet_absent_stat['results'][4]['stat']['exists']
       - "'webtest_secret' not in __testing_quadlet_absent_secrets['stdout_lines']"
+      # the ServiceName-overridden service was stopped via its real name
+      - __testing_quadlet_absent_alias['stdout'] != 'active'
       # persistent data is deliberately kept
-      - __testing_quadlet_absent_stat['results'][4]['stat']['exists']
+      - __testing_quadlet_absent_stat['results'][5]['stat']['exists']
       - "'webtest-data' in __testing_quadlet_absent_volumes['stdout_lines']"
     fail_msg: >-
       state "absent" with empty declared lists did not remove the manifest

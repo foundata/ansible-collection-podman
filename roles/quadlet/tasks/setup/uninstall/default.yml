@@ -195,6 +195,41 @@
         - (__quadlet_podman_find_result['files'] | ansible.builtin.length) > 0
 
 
+    # The generated service name normally derives from the unit file name,
+    # but a ServiceName= setting inside the file overrides it. The files
+    # still exist at this point, so they are the authoritative source.
+    - name: "Setup | Uninstall | Read the unit files of the application (service name resolution)"
+      ansible.builtin.slurp:
+        src: "{{ __quadlet_podman_owned_path }}"
+      register: __quadlet_podman_owned_slurp
+      loop: "{{ __quadlet_podman_owned_result['stdout_lines'] | ansible.builtin.default([]) }}"
+      loop_control:
+        loop_var: "__quadlet_podman_owned_path"
+        label: "{{ __quadlet_podman_owned_path }}"
+
+
+    - name: "Setup | Uninstall | Map the unit files to their generated service names"
+      ansible.builtin.set_fact:
+        __quadlet_podman_owned_service_map: >-
+          {%- set __ns = namespace(map={}) -%}
+          {%- for __r in (__quadlet_podman_owned_slurp['results'] | ansible.builtin.default([])) -%}
+          {%-   set __path = __r['__quadlet_podman_owned_path'] -%}
+          {%-   set __stem = __path | ansible.builtin.basename | ansible.builtin.splitext | ansible.builtin.first -%}
+          {%-   set __ext = __path | ansible.builtin.basename | ansible.builtin.splitext | ansible.builtin.last | ansible.builtin.regex_replace('^\.', '') -%}
+          {#-   no capture-group argument on purpose: '\1' as a Jinja string
+                literal is an octal escape (control character), which
+                regex_search rejects as "Unknown argument" -#}
+          {%-   set __line = (__r['content'] | ansible.builtin.default('') | ansible.builtin.b64decode)
+                             | ansible.builtin.regex_search('(?m)^\s*ServiceName\s*=\s*\S+\s*$') -%}
+          {%-   set __override = (__line.split('=', 1) | ansible.builtin.last | ansible.builtin.trim) if __line else '' -%}
+          {%-   set __service = (__override ~ '.service')
+                                if ((__override | ansible.builtin.length) > 0)
+                                else (__stem ~ (__quadlet_podman_service_suffix_map[__ext] | ansible.builtin.default('')) ~ '.service') -%}
+          {%-   set _ = __ns.map.update({__path: __service}) -%}
+          {%- endfor -%}
+          {{ __ns.map }}
+
+
     # Stop order: member containers and other units first, pods last (stopping
     # a pod also stops its members, but this keeps the shutdown graceful).
     - name: "Setup | Uninstall | Stop the services of the application"
@@ -206,16 +241,7 @@
       become_user: "{{ __quadlet_podman_become_user }}"
       environment: "{{ __quadlet_podman_task_environment }}"
       vars:
-        __quadlet_podman_owned_stem: "{{ __quadlet_podman_owned_path | ansible.builtin.basename | ansible.builtin.splitext | ansible.builtin.first }}"
-        __quadlet_podman_owned_ext: >-
-          {{
-            __quadlet_podman_owned_path
-            | ansible.builtin.basename
-            | ansible.builtin.splitext
-            | ansible.builtin.last
-            | ansible.builtin.regex_replace('^\.', '')
-          }}
-        __quadlet_podman_owned_service: "{{ __quadlet_podman_owned_stem }}{{ __quadlet_podman_service_suffix_map[__quadlet_podman_owned_ext] }}.service"
+        __quadlet_podman_owned_service: "{{ __quadlet_podman_owned_service_map[__quadlet_podman_owned_path] }}"
       # tolerate services that are not loaded (unit was never started or the
       # generator rejected it)
       failed_when: false
@@ -247,16 +273,7 @@
       become_user: "{{ __quadlet_podman_become_user }}"
       environment: "{{ __quadlet_podman_task_environment }}"
       vars:
-        __quadlet_podman_owned_stem: "{{ __quadlet_podman_owned_path | ansible.builtin.basename | ansible.builtin.splitext | ansible.builtin.first }}"
-        __quadlet_podman_owned_ext: >-
-          {{
-            __quadlet_podman_owned_path
-            | ansible.builtin.basename
-            | ansible.builtin.splitext
-            | ansible.builtin.last
-            | ansible.builtin.regex_replace('^\.', '')
-          }}
-        __quadlet_podman_owned_service: "{{ __quadlet_podman_owned_stem }}{{ __quadlet_podman_service_suffix_map[__quadlet_podman_owned_ext] }}.service"
+        __quadlet_podman_owned_service: "{{ __quadlet_podman_owned_service_map[__quadlet_podman_owned_path] }}"
       changed_when: false
       # tolerate services systemd does not know (unit was never started)
       failed_when: false
