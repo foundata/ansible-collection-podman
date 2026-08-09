@@ -179,7 +179,7 @@ quadlet_podman_units:
           - "multi-user.target"
 ```
 
-**Run on a schedule** (e.g. backups): set the unit's `service_state` to `unmanaged` so the role only deploys the file (it neither starts the job on converge nor stops an in-flight run), and ship the timer as a plain systemd unit of the same application via `quadlet_podman_systemd_units`. Do NOT use `RemainAfterExit` here: systemd does not re-trigger a unit that is still active, so the timer would fire into a no-op. Keep an `Install` section on the container if the job should additionally run once per boot, or set `Install: ~` to drop one inherited from `quadlet_podman_unit_defaults`.
+**Run on a schedule** (e.g. backups): set the unit's `service_state` to `unmanaged` so the role only deploys the file (it neither starts the job on converge nor stops an in-flight run), and ship the timer as a plain systemd unit of the same application via `quadlet_podman_systemd_units`. Do NOT use `RemainAfterExit` here: systemd does not re-trigger a unit that is still active, so the timer would fire into a no-op. Keep an `Install` section on the container if the job should additionally run once per boot, or set `Install: ~` to drop one inherited from `quadlet_podman_unit_defaults`. If the job container is a pod member, also set `StartWithPod: false` in its `Container` section: the generated pod service pulls its members in via `Wants=`, so without it the job runs at every pod (re)start no matter what `service_state` and `Install` say.
 
 ```yaml
 quadlet_podman_units:
@@ -517,6 +517,12 @@ in-flight run survives converges). Prefer `unmanaged` over
 `disabled` for such units, `disabled` stops the service on
 every run and would kill an in-flight timer-triggered run.
 
+Caution for pod members: the generated pod service pulls its
+member containers in via `Wants=`, so a member starts at every
+pod (re)start regardless of `unmanaged` and `Install`. A
+timer-only pod member additionally needs
+`StartWithPod: false` in its `Container` section.
+
 For a run-once container that SHOULD run once per deployment
 and configuration change (e.g. database migrations), no
 override is needed: keep the unit managed and set
@@ -549,9 +555,10 @@ identifier, removed again when de-listed and removed by
 Each item's `sections` dictionary follows the same rendering rules as
 `quadlet_podman_units` (`quadlet_podman_unit_defaults` does not
 apply). As a convenience, the `Unit` setting of `Timer` and `Path`
-sections (and the dependency settings of the `Unit` section) expand
-unit names from `quadlet_podman_units` to their generated service
-names automatically.
+sections, the `Service` setting of `Socket` sections and the
+dependency settings of the `Unit` section expand unit names from
+`quadlet_podman_units` to their generated service names
+automatically.
 
 Unlike Quadlet-generated services, these are real unit files, so
 `enabled`/`disabled` (from the item's `service_state` or the
@@ -590,10 +597,14 @@ quadlet_podman_systemd_units:
 [*⇑ Back to ToC ⇑*](#toc)
 
 File name of the systemd unit including its type suffix (e.g.
-`example-job.timer`); one of `.timer`, `.service`, `.target` or
-`.path`. Must be unique and must not collide with a unit file or
-generated service name of `quadlet_podman_units`. Allowed
-characters: letters, digits, `_`, `.` and `-`.
+`example-job.timer`); one of `.timer`, `.service`, `.target`,
+`.path` or `.socket`. Must be unique and must not collide with a
+unit file or generated service name of `quadlet_podman_units`.
+Allowed characters: letters, digits, `_`, `.` and `-`.
+
+Note for `.socket` units: systemd only starts a socket whose
+service unit exists, so pair it with a `.service` in this list
+(or name it after an existing service).
 
 - **Type**: `str`
 - **Required**: Yes
@@ -836,10 +847,11 @@ removed from this list are logged out
 again on the next run, and `quadlet_podman_state: "absent"` logs out
 of all recorded registries, so no credentials linger after removal.
 Note that the authentication file is shared per scope (one per
-rootless account, `/etc/containers/auth.json` for rootful): logging
-out removes that registry's credentials for every application using
-the file; another application that still needs them logs in again on
-its next run.
+rootless account, `/etc/containers/auth.json` for rootful). The role
+therefore only logs out of a registry when no other application's
+manifest in the same scope still declares it: shared credentials
+stay in place until the last application using them is removed or
+stops declaring the registry.
 
 Example (reference a vaulted variable instead of a literal value in
 real deployments):

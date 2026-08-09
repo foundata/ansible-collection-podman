@@ -217,12 +217,13 @@ __quadlet_podman_unit_extensions:
 
 # Unit types allowed in quadlet_podman_systemd_units (as filename suffixes);
 # also used to find candidate files during cleanup. Deliberately without
-# "socket", "mount" and other types no application manifest has needed so far.
+# "mount", "swap" and other types no application manifest has needed so far.
 __quadlet_podman_systemd_unit_suffixes:
   - "timer"
   - "service"
   - "target"
   - "path"
+  - "socket"
 
 
 # Section name that holds the type-specific settings of a plain systemd unit
@@ -233,6 +234,7 @@ __quadlet_podman_systemd_unit_section_map:
   service: "Service"
   target: "Unit"
   path: "Path"
+  socket: "Socket"
 
 
 # Suffix of the systemd service unit generated from a Quadlet file, per unit

@@ -118,28 +118,49 @@
     __testing_quadlet_timer_unit_content: "{{ __testing_quadlet_timer_unit_slurp['content'] | ansible.builtin.b64decode }}"
 
 
-- name: "Molecule | Verify | quadlet | Query the webtest-job timer state"
+- name: "Molecule | Verify | quadlet | Read the webtest-sock socket unit file"
+  ansible.builtin.slurp:
+    src: "/etc/systemd/system/webtest-sock.socket"
+  register: __testing_quadlet_socket_unit_slurp
+
+
+- name: "Molecule | Verify | quadlet | Check the webtest-sock socket unit content"
+  ansible.builtin.assert:
+    that:
+      - "'Managed by Ansible (foundata.podman.quadlet): app=webtest' in __testing_quadlet_socket_unit_content"
+      # [Socket] Service= expansion: "webtest-job" -> webtest-job.service
+      - "'Service=webtest-job.service' in __testing_quadlet_socket_unit_content"
+    quiet: true
+  vars:
+    __testing_quadlet_socket_unit_content: "{{ __testing_quadlet_socket_unit_slurp['content'] | ansible.builtin.b64decode }}"
+
+
+- name: "Molecule | Verify | quadlet | Query the webtest-job timer and webtest-sock socket state"
   ansible.builtin.command:
     argv:
       - "systemctl"
-      - "{{ item }}"
-      - "webtest-job.timer"
+      - "{{ item[0] }}"
+      - "{{ item[1] }}"
   changed_when: false
   failed_when: false
   loop:
-    - "is-enabled"
-    - "is-active"
+    - ["is-enabled", "webtest-job.timer"]
+    - ["is-active", "webtest-job.timer"]
+    - ["is-enabled", "webtest-sock.socket"]
+    - ["is-active", "webtest-sock.socket"]
   register: __testing_quadlet_timer_state_result
 
 
-- name: "Molecule | Verify | quadlet | Check the webtest-job timer is enabled and active"
+- name: "Molecule | Verify | quadlet | Check the webtest-job timer and webtest-sock socket are enabled and active"
   ansible.builtin.assert:
     that:
       # plain units support real systemctl enablement (unlike generated ones)
       - __testing_quadlet_timer_state_result['results'][0]['stdout'] == 'enabled'
       - __testing_quadlet_timer_state_result['results'][1]['stdout'] == 'active'
+      - __testing_quadlet_timer_state_result['results'][2]['stdout'] == 'enabled'
+      - __testing_quadlet_timer_state_result['results'][3]['stdout'] == 'active'
     fail_msg: >-
-      The webtest-job timer is not enabled/active:
+      The webtest-job timer or webtest-sock socket is not enabled/active:
       {{ __testing_quadlet_timer_state_result['results'] | ansible.builtin.map(attribute='stdout') | ansible.builtin.list }}
     quiet: true
 
@@ -643,6 +664,7 @@
     - "/etc/containers/systemd/webtest-init.container"
     - "/etc/containers/systemd/webtest-job.container"
     - "/etc/systemd/system/webtest-job.timer"
+    - "/etc/systemd/system/webtest-sock.socket"
 
 
 - name: "Molecule | Verify | quadlet | Reap: query the de-listed timer state"
@@ -662,6 +684,7 @@
       - not __testing_quadlet_reap_units_stat['results'][0]['stat']['exists']
       - not __testing_quadlet_reap_units_stat['results'][1]['stat']['exists']
       - not __testing_quadlet_reap_units_stat['results'][2]['stat']['exists']
+      - not __testing_quadlet_reap_units_stat['results'][3]['stat']['exists']
       - __testing_quadlet_reap_timer_state['stdout'] != 'active'
     fail_msg: >-
       De-listed run-once/timer units survived the reconciliation (file left

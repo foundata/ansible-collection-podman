@@ -63,6 +63,7 @@ The Quadlet role deploys and manages rootful or rootless OCI applications as dec
 - [Ansible role: `foundata.podman.quadlet`](roles/quadlet/README.md#ansible-role-foundatapodmanquadlet)
   - [Table of contents](roles/quadlet/README.md#toc)
   - [Example playbooks, using this role](roles/quadlet/README.md#examples)
+  - [Run-once containers and timers](roles/quadlet/README.md#run-once)
   - [Rootless applications: data, UID mapping and SELinux](roles/quadlet/README.md#rootless-notes)
   - [Supported tags](roles/quadlet/README.md#tags)
   - [Role variables](roles/quadlet/README.md#variables)

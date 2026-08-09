@@ -94,6 +94,20 @@
           Install:
             WantedBy:
               - "timers.target"
+      # Socket-activated helper: nothing ever connects during the test, the
+      # socket merely has to listen (systemd refuses to start a socket whose
+      # service unit does not exist, hence the generated service reference)
+      - name: "webtest-sock.socket"
+        sections:
+          Unit:
+            Description: "Molecule webtest activation socket"
+          Socket:
+            # expanded to "webtest-job.service" (generated service name)
+            Service: "webtest-job"
+            ListenStream: "/run/webtest-probe.sock"
+          Install:
+            WantedBy:
+              - "sockets.target"
 
 
 # The molecule instances are virtual machines, so the rootless START is
