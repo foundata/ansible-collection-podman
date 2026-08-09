@@ -457,6 +457,12 @@ argument_specs:
           custom rootful `graphroot` or a central rootless storage tree like
           `/var/lib/podman`.
 
+          Declaring a path adopts it: a pre-existing equivalence rule
+          (identical or conflicting) becomes role-owned and a conflicting
+          substitute is reconciled to `/var/lib/containers`. Removing a path
+          from this list deletes the rule and relabels the tree back to the
+          default policy; a pre-existing substitute is not restored.
+
           Every accepted path is relabeled recursively (`restorecon -F`), so
           only dedicated subtrees are accepted: the filesystem root,
           top-level system trees (`/etc`, `/usr`, `/var`, ...), anything

@@ -1,12 +1,14 @@
 # SELinux file context equivalence reconciliation for container storage paths.
 #
 # semanage equivalence rules cannot carry an ownership marker, so the role
-# records the rules it CREATED in a manifest file (one target path per line,
-# see vars/main.yml) and reconciles it against the declared paths on each run:
-# recorded rules whose path is no longer declared are removed again and their
-# trees are relabeled back to the default policy. A declared path whose rule
-# already existed (created by an administrator) is deliberately NOT recorded:
-# de-listing it later must not remove a rule the role does not own.
+# records the rules it owns in a manifest file (one target path per line,
+# see vars/main.yml) and reconciles it against the declared paths on each
+# run: recorded rules whose path is no longer declared are removed again and
+# their trees are relabeled back to the default policy. DECLARATION ADOPTS:
+# every declared path becomes role-owned, whether its rule was absent,
+# identical or conflicting before (a conflicting substitute is reconciled to
+# /var/lib/containers). De-listing removes the adopted rule; a pre-existing
+# substitute is not restored.
 #
 # Included from config/default.yml (declared paths from
 # host_podman_selinux_label_paths) and from setup/uninstall/default.yml (empty
@@ -200,23 +202,17 @@
     label: "{{ item['item'] }}"
 
 
-# Owned after this run: rules that were already recorded and are still
-# declared, plus the rules the sefcontext task actually CREATED this run. A
-# declared path whose rule pre-existed unchanged stays unrecorded (foreign).
+# Owned after this run: every declared path. Declaration adopts a
+# pre-existing rule regardless of its previous value, so de-listing behaves
+# identically on every host (recording only changed results would leave an
+# identical pre-existing rule foreign while adopting a conflicting one).
+# The recursive restorecon stays gated on an actual sefcontext change:
+# adopting an already-identical rule must not relabel active container
+# storage.
 - name: "Config | SELinux | Determine the equivalence rules the role owns"
   ansible.builtin.set_fact:
     __host_podman_selinux_owned_paths: >-
-      {{
-        ((__host_podman_selinux_recorded_paths
-          | ansible.builtin.select('ansible.builtin.in', __host_podman_selinux_declared_paths)
-          | ansible.builtin.list)
-         + (__host_podman_sefcontext_result['results'] | ansible.builtin.default([])
-            | ansible.builtin.select('ansible.builtin.changed')
-            | ansible.builtin.map(attribute='item')
-            | ansible.builtin.list))
-        | ansible.builtin.unique
-        | ansible.builtin.sort
-      }}
+      {{ __host_podman_selinux_declared_paths | ansible.builtin.unique | ansible.builtin.sort }}
 
 
 - name: "Config | SELinux | Record the role-created equivalence rules in the manifest"

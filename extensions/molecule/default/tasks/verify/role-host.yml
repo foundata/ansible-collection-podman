@@ -933,11 +933,10 @@
 
 ## SELinux equivalence-rule ownership (EL platforms)
 #
-# The role must only remove equivalence rules it created itself: a declared
-# path whose rule already existed (an administrator's rule) stays unrecorded
-# and must survive its de-listing, while a role-created rule is reaped when
-# de-listed (regression: broken manifest parsing once made every reap a
-# silent no-op, and every declared path was recorded regardless of origin).
+# Declaration adopts: every declared path becomes role-owned, whether its
+# equivalence rule was absent, identical or conflicting before (a
+# conflicting substitute is reconciled to /var/lib/containers). De-listing
+# removes the adopted rule and does not restore a pre-existing substitute.
 
 - name: "Molecule | Verify | host | Gather SELinux facts"
   ansible.builtin.setup:
@@ -958,18 +957,27 @@
         group: "root"
         mode: "u=rwx,g=rx,o=rx"
       loop:
-        - "/var/lib/molecule-foreign-store"
         - "/var/lib/molecule-own-store"
+        - "/var/lib/molecule-adopt-store"
+        - "/var/lib/molecule-conflict-store"
 
-
-    - name: "Molecule | Verify | host | SELinux: plant an administrator-owned equivalence rule"
+    # the three initial states: no rule (own-store), an identical
+    # pre-existing rule (adopt-store) and a conflicting one (conflict-store)
+    - name: "Molecule | Verify | host | SELinux: plant an identical pre-existing equivalence rule"
       community.general.sefcontext:
-        target: "/var/lib/molecule-foreign-store"
+        target: "/var/lib/molecule-adopt-store"
         substitute: "/var/lib/containers"
         state: "present"
         reload: true
 
-    - name: "Molecule | Verify | host | SELinux: run the role with the foreign path and a new path declared"
+    - name: "Molecule | Verify | host | SELinux: plant a conflicting pre-existing equivalence rule"
+      community.general.sefcontext:
+        target: "/var/lib/molecule-conflict-store"
+        substitute: "/var/lib"
+        state: "present"
+        reload: true
+
+    - name: "Molecule | Verify | host | SELinux: run the role with all three paths declared"
       ansible.builtin.include_role:
         name: "foundata.podman.host"
       vars:
@@ -979,36 +987,14 @@
             subgid: "20000:20000"
         host_podman_selinux_label_paths:
           - "/var/lib/podman"
-          - "/var/lib/molecule-foreign-store"
           - "/var/lib/molecule-own-store"
+          - "/var/lib/molecule-adopt-store"
+          - "/var/lib/molecule-conflict-store"
 
     - name: "Molecule | Verify | host | SELinux: read the manifest"
       ansible.builtin.slurp:
         src: "/etc/selinux/ansible-foundata-podman-host-equivalences"
       register: __testing_host_selinux_manifest
-
-    - name: "Molecule | Verify | host | SELinux: assert only role-created rules are recorded"
-      ansible.builtin.assert:
-        that:
-          - "'/var/lib/molecule-own-store' in __testing_host_selinux_manifest_content"
-          - "'/var/lib/molecule-foreign-store' not in __testing_host_selinux_manifest_content"
-        fail_msg: >-
-          The manifest records a pre-existing (administrator-owned) rule as
-          role-created; de-listing would remove a foreign rule.
-        success_msg: "Only role-created equivalence rules are recorded."
-      vars:
-        __testing_host_selinux_manifest_content: "{{ __testing_host_selinux_manifest['content'] | ansible.builtin.b64decode }}"
-
-    - name: "Molecule | Verify | host | SELinux: run the role again with both test paths de-listed"
-      ansible.builtin.include_role:
-        name: "foundata.podman.host"
-      vars:
-        host_podman_rootless_users:
-          - name: "containerapp"
-            subuid: "20000:20000"
-            subgid: "20000:20000"
-        host_podman_selinux_label_paths:
-          - "/var/lib/podman"
 
     - name: "Molecule | Verify | host | SELinux: list the local file context customizations"
       ansible.builtin.command:
@@ -1017,30 +1003,88 @@
       changed_when:
         - false
 
-    - name: "Molecule | Verify | host | SELinux: assert the foreign rule survived and the role-created rule was reaped"
+    - name: "Molecule | Verify | host | SELinux: assert every declared path was adopted and reconciled"
       ansible.builtin.assert:
         that:
-          - "'/var/lib/molecule-foreign-store' in __testing_host_selinux_list['stdout']"
-          - "'/var/lib/molecule-own-store' not in __testing_host_selinux_list['stdout']"
+          - "'/var/lib/molecule-own-store' in __testing_host_selinux_manifest_content"
+          - "'/var/lib/molecule-adopt-store' in __testing_host_selinux_manifest_content"
+          - "'/var/lib/molecule-conflict-store' in __testing_host_selinux_manifest_content"
+          # the conflicting substitute was reconciled to /var/lib/containers
+          - >-
+            __testing_host_selinux_list['stdout_lines']
+            | ansible.builtin.select('ansible.builtin.search', 'molecule-conflict-store')
+            | ansible.builtin.select('ansible.builtin.search', '/var/lib/containers')
+            | ansible.builtin.length > 0
         fail_msg: >-
-          De-listing removed an administrator-owned rule or left a
-          role-created rule behind.
-        success_msg: "The foreign rule survived, the role-created rule was reaped."
+          Declaration did not adopt every declared path (manifest:
+          {{ __testing_host_selinux_manifest_content }}).
+        success_msg: "All declared paths are adopted; the conflicting rule was reconciled."
+      vars:
+        __testing_host_selinux_manifest_content: "{{ __testing_host_selinux_manifest['content'] | ansible.builtin.b64decode }}"
 
-    - name: "Molecule | Verify | host | SELinux: remove the administrator-owned test rule again"
-      community.general.sefcontext:
-        target: "/var/lib/molecule-foreign-store"
-        substitute: "/var/lib/containers"
-        state: "absent"
-        reload: true
+    - name: "Molecule | Verify | host | SELinux: run the role again unchanged (stability)"
+      ansible.builtin.include_role:
+        name: "foundata.podman.host"
+      vars:
+        host_podman_rootless_users:
+          - name: "containerapp"
+            subuid: "20000:20000"
+            subgid: "20000:20000"
+        host_podman_selinux_label_paths:
+          - "/var/lib/podman"
+          - "/var/lib/molecule-own-store"
+          - "/var/lib/molecule-adopt-store"
+          - "/var/lib/molecule-conflict-store"
+
+    - name: "Molecule | Verify | host | SELinux: read the manifest after the second run"
+      ansible.builtin.slurp:
+        src: "/etc/selinux/ansible-foundata-podman-host-equivalences"
+      register: __testing_host_selinux_manifest2
+
+    - name: "Molecule | Verify | host | SELinux: assert the second run is stable"
+      ansible.builtin.assert:
+        that:
+          - __testing_host_selinux_manifest2['content'] == __testing_host_selinux_manifest['content']
+        fail_msg: "A second unchanged run modified the equivalence manifest."
+        success_msg: "A second unchanged run leaves the recorded ownership stable."
+
+    - name: "Molecule | Verify | host | SELinux: run the role again with the three test paths de-listed"
+      ansible.builtin.include_role:
+        name: "foundata.podman.host"
+      vars:
+        host_podman_rootless_users:
+          - name: "containerapp"
+            subuid: "20000:20000"
+            subgid: "20000:20000"
+        host_podman_selinux_label_paths:
+          - "/var/lib/podman"
+
+    - name: "Molecule | Verify | host | SELinux: list the customizations after de-listing"
+      ansible.builtin.command:
+        argv: ["semanage", "fcontext", "--list", "-C"]
+      register: __testing_host_selinux_list_after
+      changed_when:
+        - false
+
+    - name: "Molecule | Verify | host | SELinux: assert every adopted rule was removed"
+      ansible.builtin.assert:
+        that:
+          - "'/var/lib/molecule-own-store' not in __testing_host_selinux_list_after['stdout']"
+          - "'/var/lib/molecule-adopt-store' not in __testing_host_selinux_list_after['stdout']"
+          - "'/var/lib/molecule-conflict-store' not in __testing_host_selinux_list_after['stdout']"
+        fail_msg: >-
+          De-listing left an adopted equivalence rule behind
+          ({{ __testing_host_selinux_list_after['stdout_lines'] | ansible.builtin.select('ansible.builtin.search', 'molecule-') | ansible.builtin.list }}).
+        success_msg: "De-listing removed every adopted rule, regardless of its initial state."
 
     - name: "Molecule | Verify | host | SELinux: remove the test directories again"
       ansible.builtin.file:
         path: "{{ item }}"
         state: "absent"
       loop:
-        - "/var/lib/molecule-foreign-store"
         - "/var/lib/molecule-own-store"
+        - "/var/lib/molecule-adopt-store"
+        - "/var/lib/molecule-conflict-store"
 
 
 ## Check mode on the deployed host
