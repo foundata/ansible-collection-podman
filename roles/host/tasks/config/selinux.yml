@@ -39,13 +39,15 @@
         __host_podman_selinux_declared_paths
         | ansible.builtin.select('ansible.builtin.search', '/$')
         | ansible.builtin.length == 0
-      # not / or a top-level system tree
+      # not /, a top-level system tree, or /var/lib: with / and /var those
+      # are the ancestors of the equivalence source /var/lib/containers, and
+      # an ancestor as target would relabel most application state
       - >-
         __host_podman_selinux_declared_paths
         | ansible.builtin.select('ansible.builtin.in',
             ['/', '/bin', '/boot', '/dev', '/etc', '/home', '/lib', '/lib64',
              '/opt', '/proc', '/root', '/run', '/sbin', '/srv', '/sys',
-             '/tmp', '/usr', '/var'])
+             '/tmp', '/usr', '/var', '/var/lib'])
         | ansible.builtin.length == 0
       # not below /var/lib/containers (already carries the contexts)
       - >-
