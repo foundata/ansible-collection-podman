@@ -49,6 +49,48 @@
       }}
 
 
+# The manifests of the other applications are read BEFORE anything is
+# removed: legacy duplicate ownership records (from role versions without the
+# exclusivity check) must protect a resource another application still
+# claims, and the registry logout below needs them as well. Root-side, so no
+# account is required.
+- name: "Setup | Uninstall | Find the manifests of the other applications in this scope"
+  ansible.builtin.find:
+    paths: "{{ __quadlet_podman_manifest_dir_path }}"
+    patterns:
+      - "*.ansible-manifest"
+    file_type: "file"
+  register: __quadlet_podman_manifest_find
+
+
+- name: "Setup | Uninstall | Read the manifests of the other applications in this scope"
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  register: __quadlet_podman_other_manifests_slurp
+  loop: >-
+    {{
+      __quadlet_podman_manifest_find['files']
+      | ansible.builtin.map(attribute='path')
+      | ansible.builtin.reject('ansible.builtin.eq', __quadlet_podman_manifest_file_path)
+      | ansible.builtin.list
+    }}
+  loop_control:
+    label: "{{ item }}"
+
+
+- name: "Setup | Uninstall | Determine the resources claimed by the other applications"
+  ansible.builtin.set_fact:
+    __quadlet_podman_other_claims_now: >-
+      {%- set __ns = namespace(secrets=[], files=[]) -%}
+      {%- for __result in (__quadlet_podman_other_manifests_slurp['results'] | ansible.builtin.default([])) -%}
+      {%-   set __manifest = ((__result['content'] | ansible.builtin.default('') | ansible.builtin.b64decode
+                               | ansible.builtin.from_yaml) | ansible.builtin.default({}, true)) -%}
+      {%-   set __ns.secrets = __ns.secrets + (__manifest['secrets'] | ansible.builtin.default([])) -%}
+      {%-   set __ns.files = __ns.files + (__manifest['files'] | ansible.builtin.default([])) -%}
+      {%- endfor -%}
+      {{ {'secrets': __ns.secrets, 'files': __ns.files} }}
+
+
 # Account-dependent removals: everything below needs the service account (its
 # systemd user instance, its Podman storage or its home directory) and is
 # skipped when the account is gone. The root-side cleanup after this block
@@ -311,7 +353,9 @@
       register: __quadlet_podman_exec_stat
 
 
-    # Only secret names are handled here, no secret values are involved.
+    # Only secret names are handled here, no secret values are involved. A
+    # name another application's current manifest still claims (a legacy
+    # duplicate ownership record) is left for that application.
     - name: "Setup | Uninstall | Remove the Podman secrets of the application"
       containers.podman.podman_secret:
         name: "{{ __quadlet_podman_secret_name }}"
@@ -327,6 +371,7 @@
           ((__quadlet_podman_manifest_old['secrets'] | ansible.builtin.default([]))
            + __quadlet_podman_secret_names_declared)
           | ansible.builtin.unique
+          | ansible.builtin.reject('ansible.builtin.in', __quadlet_podman_other_claims_now['secrets'])
           | ansible.builtin.list
         }}
       loop_control:
@@ -336,32 +381,8 @@
     # All applications of a scope share one authfile, so a logout for this
     # application would also cut off every other application still using the
     # same registry (until its next run re-creates the login). The manifests
-    # of the other applications in this scope therefore decide which
+    # of the other applications (read at the top of this file) decide which
     # registries are actually safe to log out of.
-    - name: "Setup | Uninstall | Find the manifests of the other applications in this scope"
-      ansible.builtin.find:
-        paths: "{{ __quadlet_podman_manifest_dir_path }}"
-        patterns:
-          - "*.ansible-manifest"
-        file_type: "file"
-      register: __quadlet_podman_manifest_find
-
-
-    - name: "Setup | Uninstall | Read the manifests of the other applications in this scope"
-      ansible.builtin.slurp:
-        src: "{{ item }}"
-      register: __quadlet_podman_other_manifests_slurp
-      loop: >-
-        {{
-          __quadlet_podman_manifest_find['files']
-          | ansible.builtin.map(attribute='path')
-          | ansible.builtin.reject('ansible.builtin.eq', __quadlet_podman_manifest_file_path)
-          | ansible.builtin.list
-        }}
-      loop_control:
-        label: "{{ item }}"
-
-
     # Removes the registry's credentials from the (per-scope, shared)
     # authfile. Registries that the manifest of another application in this
     # scope still declares are skipped: logging them out here would break that
@@ -469,6 +490,7 @@
       ((__quadlet_podman_manifest_old['files'] | ansible.builtin.default([]))
        + (quadlet_podman_files | ansible.builtin.map(attribute='dest') | ansible.builtin.list))
       | ansible.builtin.unique
+      | ansible.builtin.reject('ansible.builtin.in', __quadlet_podman_other_claims_now['files'])
       | ansible.builtin.list
     }}
   loop_control:
