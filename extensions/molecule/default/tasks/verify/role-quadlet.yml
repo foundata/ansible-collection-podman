@@ -1223,6 +1223,200 @@
       are rejected before anything is changed.
 
 
+# ServiceName transitions: a unit that keeps its file name but changes its
+# generated service identity must retire the old service before the file is
+# rewritten (regression: the old service kept running headless because the
+# filename never became stale and the overwrite destroyed the old name).
+- name: "Molecule | Verify | quadlet | Rename: deploy a worker with ServiceName v1"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "renametest"
+    quadlet_podman_service_state: "running"
+    quadlet_podman_units:
+      - name: "renameworker"
+        type: "container"
+        sections:
+          Container:
+            ContainerName: "renametest-v1"
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "top"
+            ServiceName: "renametest-v1"
+
+
+- name: "Molecule | Verify | quadlet | Rename: redeploy the same file with ServiceName v2"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "renametest"
+    quadlet_podman_service_state: "running"
+    quadlet_podman_units:
+      - name: "renameworker"
+        type: "container"
+        sections:
+          Container:
+            ContainerName: "renametest-v2"
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "top"
+            ServiceName: "renametest-v2"
+
+
+- name: "Molecule | Verify | quadlet | Rename: query both service generations"
+  ansible.builtin.command:
+    argv: ["systemctl", "is-active", "{{ item }}"]
+  register: __testing_quadlet_rename_state
+  changed_when:
+    - false
+  failed_when:
+    - false
+  loop:
+    - "renametest-v1.service"
+    - "renametest-v2.service"
+
+
+- name: "Molecule | Verify | quadlet | Rename: drop the override again (fallback to the derived name)"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "renametest"
+    quadlet_podman_service_state: "running"
+    quadlet_podman_units:
+      - name: "renameworker"
+        type: "container"
+        sections:
+          Container:
+            ContainerName: "renametest-v3"
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "top"
+
+
+- name: "Molecule | Verify | quadlet | Rename: query the v2 and derived generations"
+  ansible.builtin.command:
+    argv: ["systemctl", "is-active", "{{ item }}"]
+  register: __testing_quadlet_rename_state2
+  changed_when:
+    - false
+  failed_when:
+    - false
+  loop:
+    - "renametest-v2.service"
+    - "renameworker.service"
+
+
+- name: "Molecule | Verify | quadlet | Rename: switch back to an override with service state unmanaged"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "renametest"
+    quadlet_podman_units:
+      - name: "renameworker"
+        type: "container"
+        service_state: "unmanaged"
+        sections:
+          Container:
+            ContainerName: "renametest-v4"
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "top"
+            ServiceName: "renametest-v4"
+
+
+- name: "Molecule | Verify | quadlet | Rename: query the derived and v4 generations"
+  ansible.builtin.command:
+    argv: ["systemctl", "is-active", "{{ item }}"]
+  register: __testing_quadlet_rename_state3
+  changed_when:
+    - false
+  failed_when:
+    - false
+  loop:
+    - "renameworker.service"
+    - "renametest-v4.service"
+
+
+- name: "Molecule | Verify | quadlet | Rename: assert every obsolete generation was retired"
+  ansible.builtin.assert:
+    that:
+      # after v1 -> v2: only v2 active
+      - __testing_quadlet_rename_state['results'][0]['stdout'] != 'active'
+      - __testing_quadlet_rename_state['results'][1]['stdout'] == 'active'
+      # after dropping the override: only the derived name active
+      - __testing_quadlet_rename_state2['results'][0]['stdout'] != 'active'
+      - __testing_quadlet_rename_state2['results'][1]['stdout'] == 'active'
+      # unmanaged retires the old identity but does not start the new one
+      - __testing_quadlet_rename_state3['results'][0]['stdout'] != 'active'
+      - __testing_quadlet_rename_state3['results'][1]['stdout'] != 'active'
+    fail_msg: >-
+      A ServiceName transition left an obsolete service running or started
+      an unmanaged one (v1: {{ __testing_quadlet_rename_state['results'][0]['stdout'] }},
+      v2 then: {{ __testing_quadlet_rename_state['results'][1]['stdout'] }},
+      v2 after drop: {{ __testing_quadlet_rename_state2['results'][0]['stdout'] }},
+      derived: {{ __testing_quadlet_rename_state2['results'][1]['stdout'] }},
+      derived after v4: {{ __testing_quadlet_rename_state3['results'][0]['stdout'] }},
+      v4: {{ __testing_quadlet_rename_state3['results'][1]['stdout'] }}).
+    success_msg: >-
+      ServiceName transitions retire the obsolete service in every
+      direction, including into an unmanaged replacement.
+
+
+# Pre-manifest fallback: without the manifest the old identity has to be
+# parsed from the still-unmodified owned unit file.
+- name: "Molecule | Verify | quadlet | Rename: drop the manifest to simulate a pre-manifest deployment"
+  ansible.builtin.file:
+    path: "/var/lib/ansible-podman-quadlet/system/renametest.ansible-manifest"
+    state: "absent"
+
+
+- name: "Molecule | Verify | quadlet | Rename: transition once more without a manifest"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "renametest"
+    quadlet_podman_service_state: "running"
+    quadlet_podman_units:
+      - name: "renameworker"
+        type: "container"
+        sections:
+          Container:
+            ContainerName: "renametest-v5"
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "top"
+            ServiceName: "renametest-v5"
+
+
+- name: "Molecule | Verify | quadlet | Rename: query the v4 and v5 generations"
+  ansible.builtin.command:
+    argv: ["systemctl", "is-active", "{{ item }}"]
+  register: __testing_quadlet_rename_state4
+  changed_when:
+    - false
+  failed_when:
+    - false
+  loop:
+    - "renametest-v4.service"
+    - "renametest-v5.service"
+
+
+- name: "Molecule | Verify | quadlet | Rename: assert the file-parsed fallback retired the old identity"
+  ansible.builtin.assert:
+    that:
+      - __testing_quadlet_rename_state4['results'][0]['stdout'] != 'active'
+      - __testing_quadlet_rename_state4['results'][1]['stdout'] == 'active'
+    fail_msg: >-
+      Without a manifest the previous service identity was not retired from
+      the owned unit file (v4:
+      {{ __testing_quadlet_rename_state4['results'][0]['stdout'] }}, v5:
+      {{ __testing_quadlet_rename_state4['results'][1]['stdout'] }}).
+    success_msg: "The pre-manifest fallback retires the old identity parsed from the unit file."
+
+
+- name: "Molecule | Verify | quadlet | Rename: remove the renametest application again"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "renametest"
+    quadlet_podman_state: "absent"
+
+
 # Enablement transition: removing the Install section together with state
 # "running" must remove the old enablement symlink (regression: the
 # enablement was simply left untouched without an Install section).

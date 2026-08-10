@@ -396,6 +396,103 @@
   no_log: true # registry credentials must not be leaked into logs or diffs
 
 
+# Retire obsolete generated services BEFORE the unit files are rewritten: a
+# unit that keeps its file name but changes its generated service identity
+# (ServiceName= added, removed or changed; a type change) is invisible to the
+# filename-based stale cleanup, and after the overwrite plus daemon reload
+# the old service would keep running headless next to its replacement. The
+# previous identities come from the manifest's services list, with the
+# service names parsed out of the still-unmodified marker-owned files as the
+# fallback for deployments recorded before that manifest field existed.
+- name: "Config | Default | Read the owned Quadlet unit files (previous service identities)"
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  register: __quadlet_podman_prev_unit_slurp
+  loop: >-
+    {{
+      __quadlet_podman_unit_dest_owned_result['stdout_lines'] | ansible.builtin.default([])
+      | ansible.builtin.select('ansible.builtin.match', '^' ~ (__quadlet_podman_unit_dir_path | ansible.builtin.regex_escape) ~ '/')
+      | ansible.builtin.list
+    }}
+  loop_control:
+    label: "{{ item }}"
+
+
+- name: "Config | Default | Determine the obsolete generated services"
+  ansible.builtin.set_fact:
+    __quadlet_podman_obsolete_services: >-
+      {%- set __ns = namespace(old=[]) -%}
+      {%- for __svc in (__quadlet_podman_manifest_old['services'] | ansible.builtin.default([])) -%}
+      {%-   set _ = __ns.old.append(__svc) -%}
+      {%- endfor -%}
+      {%- for __r in (__quadlet_podman_prev_unit_slurp['results'] | ansible.builtin.default([])) -%}
+      {%-   set __path = __r['item'] -%}
+      {%-   set __stem = __path | ansible.builtin.basename | ansible.builtin.splitext | ansible.builtin.first -%}
+      {%-   set __ext = __path | ansible.builtin.basename | ansible.builtin.splitext | ansible.builtin.last | ansible.builtin.regex_replace('^\.', '') -%}
+      {%-   set __line = (__r['content'] | ansible.builtin.default('') | ansible.builtin.b64decode)
+                         | ansible.builtin.regex_search('(?m)^\s*ServiceName\s*=\s*\S+\s*$') -%}
+      {%-   set __override = (__line.split('=', 1) | ansible.builtin.last | ansible.builtin.trim) if __line else '' -%}
+      {%-   set __svc = (__override ~ '.service')
+                        if ((__override | ansible.builtin.length) > 0)
+                        else (__stem ~ (__quadlet_podman_service_suffix_map[__ext] | ansible.builtin.default('')) ~ '.service') -%}
+      {%-   set _ = __ns.old.append(__svc) -%}
+      {%- endfor -%}
+      {{
+        __ns.old | ansible.builtin.unique
+        | ansible.builtin.reject('ansible.builtin.in',
+            (__quadlet_podman_units_effective | ansible.builtin.map(attribute='service') | ansible.builtin.list)
+            + (__quadlet_podman_systemd_units_effective | ansible.builtin.map(attribute='name') | ansible.builtin.list))
+        | ansible.builtin.list
+      }}
+
+
+# An unknown or already unloaded obsolete service counts as retired; every
+# other stop failure aborts the run BEFORE the old unit file is overwritten
+# (the file is the last remaining record of the old identity).
+- name: "Config | Default | Stop the obsolete generated services"
+  ansible.builtin.systemd_service:
+    name: "{{ __quadlet_podman_obsolete_service }}"
+    state: "stopped"
+    scope: "{{ __quadlet_podman_systemd_scope }}"
+  become: true
+  become_user: "{{ __quadlet_podman_become_user }}"
+  environment: "{{ __quadlet_podman_task_environment }}"
+  register: __quadlet_podman_obsolete_stop_result
+  failed_when:
+    - __quadlet_podman_obsolete_stop_result is ansible.builtin.failed
+    - >-
+      (__quadlet_podman_obsolete_stop_result['msg'] | ansible.builtin.default('') | ansible.builtin.lower)
+      is not ansible.builtin.search('not found|not loaded|could not be found|does not exist')
+  when:
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+  loop: "{{ __quadlet_podman_obsolete_services }}"
+  loop_control:
+    loop_var: "__quadlet_podman_obsolete_service"
+    label: "{{ __quadlet_podman_obsolete_service }}"
+
+
+- name: "Config | Default | Clear the failed state of the obsolete services"
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [__quadlet_podman_systemctl_exec_path]
+        + (['--user'] if (__quadlet_podman_rootless | ansible.builtin.bool) else [])
+        + ['reset-failed', __quadlet_podman_obsolete_service]
+      }}
+  become: true
+  become_user: "{{ __quadlet_podman_become_user }}"
+  environment: "{{ __quadlet_podman_task_environment }}"
+  changed_when: false
+  # tolerate services systemd does not know (unit was never started)
+  failed_when: false
+  when:
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+  loop: "{{ __quadlet_podman_obsolete_services }}"
+  loop_control:
+    loop_var: "__quadlet_podman_obsolete_service"
+    label: "{{ __quadlet_podman_obsolete_service }}"
+
+
 - name: "Config | Default | Create the Quadlet unit files of the application"
   ansible.builtin.template:
     src: "quadlet_unit.j2"

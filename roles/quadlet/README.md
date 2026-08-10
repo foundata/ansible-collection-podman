@@ -335,7 +335,10 @@ enabling it for boot.
 `unmanaged`: Ansible does not manage the service at all: both the
 running state and the boot (enablement) state are left exactly as they
 are. This is primarily useful when services are monitored and managed
-by systems other than Ansible.
+by systems other than Ansible. It applies to the CURRENTLY declared
+service only: removing a unit or changing its generated service name
+(e.g. via `ServiceName`) retires the previous service, `unmanaged`
+does not preserve obsolete identities.
 
 The singular form (`service`) is used for simplicity. However, the defined
 status applies to all services if multiple are being managed by this role.
