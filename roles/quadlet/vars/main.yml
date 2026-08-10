@@ -385,6 +385,7 @@ __quadlet_podman_task_environment: >-
 __quadlet_podman_podman_exec_path: "/usr/bin/podman"
 __quadlet_podman_grep_exec_path: "/usr/bin/grep"
 __quadlet_podman_systemctl_exec_path: "/usr/bin/systemctl"
+__quadlet_podman_systemd_analyze_exec_path: "/usr/bin/systemd-analyze"
 
 
 ### Override defaults of dependencies used by this role (if any).

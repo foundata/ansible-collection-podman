@@ -599,3 +599,140 @@
           and "artifact" units require at least
           {{ __quadlet_podman_artifact_min_podman_version }}.
         quiet: true
+
+
+### Collisions with units the role does not own
+#
+# Quadlet output lands in the systemd generator directory, which loses
+# against /etc/systemd/system (resp. ~/.config/systemd/user) and wins against
+# /usr/lib/systemd/system. A native unit file with the name of a generated
+# service therefore either shadows the container silently (the role would
+# then start, stop and restart a completely unrelated service) or gets
+# shadowed by it. Both are rejected here, BEFORE any unit file is written.
+#
+# Two probes are needed: systemctl reports what is effective right now
+# (including transient, linked and masked units, which no directory listing
+# shows), while the search-path scan also finds files that lose against the
+# generator output and would be shadowed without a trace.
+
+- name: "Init | Check for foreign systemd units colliding with the generated service names"
+  when:
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+    - (__quadlet_podman_units_effective | ansible.builtin.length) > 0
+  block:
+
+    - name: "Init | Query the effective systemd unit of every generated service name"
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [__quadlet_podman_systemctl_exec_path]
+            + (['--user'] if (__quadlet_podman_rootless | ansible.builtin.bool) else [])
+            + ['show', '--property=LoadState', '--property=FragmentPath', '--property=SourcePath',
+               '--', __quadlet_podman_collision_service]
+          }}
+      become: true
+      become_user: "{{ __quadlet_podman_become_user }}"
+      environment: "{{ __quadlet_podman_task_environment }}"
+      changed_when: false
+      # read-only; under "--check" the following assert would dereference a
+      # missing result otherwise
+      check_mode: false
+      loop: "{{ __quadlet_podman_units_effective | ansible.builtin.map(attribute='service') | ansible.builtin.list }}"
+      loop_control:
+        loop_var: "__quadlet_podman_collision_service"
+      register: __quadlet_podman_collision_show_result
+
+
+    - name: "Init | Determine the systemd unit search path of the scope"
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [__quadlet_podman_systemd_analyze_exec_path]
+            + (['--user'] if (__quadlet_podman_rootless | ansible.builtin.bool) else [])
+            + ['unit-paths']
+          }}
+      become: true
+      become_user: "{{ __quadlet_podman_become_user }}"
+      environment: "{{ __quadlet_podman_task_environment }}"
+      changed_when: false
+      check_mode: false
+      # older systemd releases without "unit-paths": the systemctl probe above
+      # still covers everything that is effective
+      failed_when: false
+      register: __quadlet_podman_collision_paths_result
+
+
+    - name: "Init | Search the unit search path for files named like a generated service"
+      ansible.builtin.find:
+        paths: "{{ __quadlet_podman_collision_search_paths }}"
+        patterns: "{{ __quadlet_podman_units_effective | ansible.builtin.map(attribute='service') | ansible.builtin.list }}"
+        file_type: "any"
+      vars:
+        # generator output is the role's own result, never a collision
+        __quadlet_podman_collision_search_paths: >-
+          {{
+            (__quadlet_podman_collision_paths_result['stdout_lines'] | ansible.builtin.default([]))
+            | ansible.builtin.map('ansible.builtin.trim')
+            | ansible.builtin.reject('ansible.builtin.equalto', '')
+            | ansible.builtin.reject('ansible.builtin.search', '/systemd/generator')
+            | ansible.builtin.list
+          }}
+      when:
+        - (__quadlet_podman_collision_paths_result['rc'] | ansible.builtin.default(1)) == 0
+      register: __quadlet_podman_collision_find_result
+
+
+    - name: "Init | Check no foreign unit collides with a generated service name"
+      ansible.builtin.assert:
+        that:
+          - (__quadlet_podman_collision_violations | ansible.builtin.length) == 0
+        fail_msg: >-
+          Refusing to manage this application:
+          {{ __quadlet_podman_collision_violations | ansible.builtin.join('; ') }}.
+          Choose another unit name or set ServiceName in the affected unit.
+        quiet: true
+      vars:
+        # unit files of THIS application: their generator output is expected
+        __quadlet_podman_collision_own_sources: >-
+          {{
+            ((__quadlet_podman_units_effective | ansible.builtin.map(attribute='filename') | ansible.builtin.list)
+             + ((__quadlet_podman_manifest_old | ansible.builtin.default({}, true))['units']
+                | ansible.builtin.default([])))
+            | ansible.builtin.unique
+            | ansible.builtin.map('ansible.builtin.regex_replace', '^', __quadlet_podman_unit_dir_path ~ '/')
+            | ansible.builtin.list
+          }}
+        __quadlet_podman_collision_violations: >-
+          {%- set __ns = namespace(rows=[]) -%}
+          {%- for __r in (__quadlet_podman_collision_show_result['results'] | ansible.builtin.default([])) -%}
+          {%-   set __props = {} -%}
+          {%-   for __line in (__r['stdout_lines'] | ansible.builtin.default([])) -%}
+          {%-     set __props = __props | ansible.builtin.combine(
+                    {(__line.split('=', 1)[0]): (__line.split('=', 1)[1:] | ansible.builtin.first | ansible.builtin.default(''))}) -%}
+          {%-   endfor -%}
+          {%-   set __service = __r['__quadlet_podman_collision_service'] -%}
+          {%-   set __load = __props.get('LoadState', 'not-found') -%}
+          {%-   set __fragment = __props.get('FragmentPath', '') -%}
+          {%-   set __source = __props.get('SourcePath', '') -%}
+          {%-   if __load != 'not-found' -%}
+          {%-     if not (__fragment is ansible.builtin.search('/systemd/generator')) -%}
+          {%-       set __origin = ('a masked unit' if (__fragment == '/dev/null')
+                      else (__fragment if (__fragment | ansible.builtin.length) > 0
+                            else ('a ' ~ __load ~ ' unit'))) -%}
+          {%-       set _ = __ns.rows.append(
+                      'the generated service name ' ~ __service ~ ' conflicts with ' ~ __origin) -%}
+          {%-     elif (__source | ansible.builtin.length) > 0
+                    and (__source not in __quadlet_podman_collision_own_sources) -%}
+          {%-       set _ = __ns.rows.append(
+                      'the generated service name ' ~ __service
+                      ~ ' is already generated from the foreign Quadlet ' ~ __source) -%}
+          {%-     endif -%}
+          {%-   endif -%}
+          {%- endfor -%}
+          {#- files that would be shadowed BY the generator output -#}
+          {%- for __f in (__quadlet_podman_collision_find_result['files'] | ansible.builtin.default([])) -%}
+          {%-   set _ = __ns.rows.append(
+                  'the generated service name ' ~ (__f['path'] | ansible.builtin.basename)
+                  ~ ' would shadow the existing unit ' ~ __f['path']) -%}
+          {%- endfor -%}
+          {{ __ns.rows | ansible.builtin.unique }}

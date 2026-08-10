@@ -742,6 +742,135 @@
     success_msg: "De-listed run-once and timer units were removed and stopped."
 
 
+## Collision with an administrator-owned native unit
+#
+# Regression: a hand-written /etc/systemd/system/<name>.service shadows the
+# Quadlet generator output of the same name, so the role's service management
+# would have started, stopped and restarted a completely unrelated service.
+# The reverse (the generator shadowing a unit further down the search path)
+# is just as wrong and is rejected as well.
+
+- name: "Molecule | Verify | quadlet | Collision: plant a native service with the generated name"
+  ansible.builtin.copy:
+    content: |
+      [Unit]
+      Description=Molecule collision decoy, unrelated to any container
+
+      [Service]
+      Type=oneshot
+      ExecStart=/bin/true
+    dest: "/etc/systemd/system/collisiontest.service"
+    owner: "root"
+    group: "root"
+    mode: "u=rw,g=r,o=r"
+
+
+- name: "Molecule | Verify | quadlet | Collision: reload systemd so the decoy is effective"
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+
+- name: "Molecule | Verify | quadlet | Collision: deploy an application colliding with it (must fail)"
+  block:
+
+    - name: "Molecule | Verify | quadlet | Collision: run the role with the colliding unit name"
+      ansible.builtin.include_role:
+        name: "foundata.podman.quadlet"
+      vars:
+        quadlet_podman_app: "collisionapp"
+        quadlet_podman_units:
+          - name: "collisiontest"
+            type: "container"
+            sections:
+              Container:
+                Image: "quay.io/libpod/testimage:20241011"
+                Exec: "top"
+              Install:
+                WantedBy:
+                  - "multi-user.target"
+
+    - name: "Molecule | Verify | quadlet | Collision: fail because the collision was accepted"
+      ansible.builtin.fail:
+        msg: >-
+          The role accepted a unit whose generated service name is already
+          taken by a native service; it would manage that foreign service.
+
+  rescue:
+
+    - name: "Molecule | Verify | quadlet | Collision: assert the run failed in the collision check"
+      ansible.builtin.assert:
+        that:
+          - >-
+            'collisiontest.service' in (ansible_failed_result['msg'] | ansible.builtin.default(''))
+          - >-
+            '/etc/systemd/system/collisiontest.service' in
+            (ansible_failed_result['msg'] | ansible.builtin.default(''))
+        fail_msg: >-
+          The run failed, but not with the collision message naming both the
+          generated service and the foreign unit:
+          {{ ansible_failed_result['msg'] | ansible.builtin.default('(no message)') }}
+        success_msg: >-
+          A generated service name colliding with a native unit is rejected,
+          naming both sources.
+
+
+- name: "Molecule | Verify | quadlet | Collision: check nothing was deployed for the refused application"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: __testing_quadlet_collision_leftovers
+  loop:
+    - "/etc/containers/systemd/collisiontest.container"
+    - "/var/lib/ansible-podman-quadlet/system/collisionapp.ansible-manifest"
+
+
+- name: "Molecule | Verify | quadlet | Collision: assert the refusal happened before any change"
+  ansible.builtin.assert:
+    that:
+      - not (item['stat']['exists'] | ansible.builtin.bool)
+    fail_msg: "The refused application still left {{ item['item'] }} behind."
+    success_msg: "The collision is rejected before any unit file or manifest is written."
+  loop: "{{ __testing_quadlet_collision_leftovers['results'] }}"
+  loop_control:
+    label: "{{ item['item'] }}"
+
+
+- name: "Molecule | Verify | quadlet | Collision: remove the decoy again"
+  ansible.builtin.file:
+    path: "/etc/systemd/system/collisiontest.service"
+    state: "absent"
+
+
+- name: "Molecule | Verify | quadlet | Collision: reload systemd after removing the decoy"
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+
+# The same declaration must be accepted once the foreign unit is gone,
+# otherwise the check would just be a blanket refusal.
+- name: "Molecule | Verify | quadlet | Collision: deploy the same application without the decoy"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "collisionapp"
+    quadlet_podman_service_state: "unmanaged"
+    quadlet_podman_units:
+      - name: "collisiontest"
+        type: "container"
+        sections:
+          Container:
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "top"
+
+
+- name: "Molecule | Verify | quadlet | Collision: remove the test application again"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "collisionapp"
+    quadlet_podman_state: "absent"
+    quadlet_podman_units: []
+
+
 ## Registry credential reconciliation (offline, per-application authfiles)
 #
 # podman logout only edits the authentication file, so the reconciliation can

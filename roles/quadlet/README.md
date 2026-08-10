@@ -451,6 +451,15 @@ overwritten when it carries this application's ownership marker
 (files of other applications and unmarked administrator files are
 rejected, never touched).
 
+The namespace extends beyond Quadlet: generated services live in
+systemd's generator directory, which loses against a native unit in
+`/etc/systemd/system` (resp. `~/.config/systemd/user`) and wins
+against one below `/usr`. Either way the wrong unit would be
+managed or silently shadowed, so before writing anything the role
+rejects every generated service name that an existing unit outside
+the generator directories already occupies, naming both the service
+and the conflicting unit path.
+
 As a convenience, values in the `Unit`
 section's `After`, `Requires`, `Wants`, `BindsTo`, `PartOf` and
 `Before` settings that match the `name` of another unit in this list
