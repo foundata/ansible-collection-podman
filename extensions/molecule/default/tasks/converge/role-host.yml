@@ -61,3 +61,7 @@
         # ranges relative to this one).
         subuid: "20000:20000"
         subgid: "20000:20000"
+        # A string on purpose (as delivered by "-e var=true" command line
+        # extra-vars): nested boolean keys have to be coerced, a truthiness
+        # evaluation would work here but flip on "false".
+        linger: "true"

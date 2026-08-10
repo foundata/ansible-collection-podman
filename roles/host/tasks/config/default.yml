@@ -361,7 +361,7 @@
     path: "{{ __host_podman_auto_update_timer_dropin_dir_path }}"
     state: "absent"
   when:
-    - (not host_podman_auto_update) or (host_podman_service_state == 'unmanaged')
+    - (not (host_podman_auto_update | ansible.builtin.bool)) or (host_podman_service_state == 'unmanaged')
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
   notify:
     - "host_podman: systemd daemon-reload"

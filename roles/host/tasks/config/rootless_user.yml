@@ -323,7 +323,7 @@
           - "{{ __host_podman_ru['name'] }}"
       changed_when: true
       when:
-        - __host_podman_ru['linger']
+        - __host_podman_ru['linger'] | ansible.builtin.bool
         - not __host_podman_ru_linger_stat['stat']['exists']
         - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
 
@@ -336,7 +336,7 @@
           - "{{ __host_podman_ru['name'] }}"
       changed_when: true
       when:
-        - not __host_podman_ru['linger']
+        - not (__host_podman_ru['linger'] | ansible.builtin.bool)
         - __host_podman_ru_linger_stat['stat']['exists']
         - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
 
@@ -346,7 +346,7 @@
         path: "/run/user/{{ __host_podman_ru_uid }}"
         timeout: 30
       when:
-        - __host_podman_ru['linger']
+        - __host_podman_ru['linger'] | ansible.builtin.bool
         - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
 
 
@@ -435,6 +435,6 @@
       vars:
         __host_podman_ru_timer_on: "{{ __host_podman_ru['auto_update'] | ansible.builtin.bool }}"
       when:
-        - __host_podman_ru['linger']
+        - __host_podman_ru['linger'] | ansible.builtin.bool
         - host_podman_service_state != 'unmanaged'
         - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
