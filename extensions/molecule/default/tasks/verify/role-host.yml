@@ -635,6 +635,75 @@
         remove: true
 
 
+## Rootless removal (state absent) retires the per-user timer
+#
+# Regression: `state: "absent"` on a host_podman_rootless_users entry removed
+# lingering but left the per-user podman-auto-update.timer enabled — the
+# surviving enablement symlink would reactivate it at the account's next
+# login. Self-contained: a dedicated account so the fixtures of the other
+# sections stay untouched.
+
+- name: "Molecule | Verify | host | Rootless absent: create a dedicated test account"
+  ansible.builtin.user:
+    name: "timeruser"
+    create_home: true
+
+- name: "Molecule | Verify | host | Rootless absent: enable the account for rootless Podman"
+  ansible.builtin.include_role:
+    name: "foundata.podman.host"
+  vars:
+    host_podman_rootless_users:
+      - name: "timeruser"
+        subuid: "40000:20000"
+        subgid: "40000:20000"
+
+- name: "Molecule | Verify | host | Rootless absent: get information about the timer enablement symlink"
+  ansible.builtin.stat:
+    path: "/home/timeruser/.config/systemd/user/timers.target.wants/podman-auto-update.timer"
+  register: __testing_host_rootless_absent_symlink
+
+- name: "Molecule | Verify | host | Rootless absent: assert the per-user timer is enabled"
+  ansible.builtin.assert:
+    that:
+      - __testing_host_rootless_absent_symlink['stat']['exists'] | ansible.builtin.bool
+    fail_msg: "The per-user automatic image update timer was not enabled for the test account."
+    success_msg: "The per-user automatic image update timer is enabled for the test account."
+
+- name: "Molecule | Verify | host | Rootless absent: remove the rootless enablement again"
+  ansible.builtin.include_role:
+    name: "foundata.podman.host"
+  vars:
+    host_podman_rootless_users:
+      - name: "timeruser"
+        state: "absent"
+        subuid: "40000:20000"
+        subgid: "40000:20000"
+
+- name: "Molecule | Verify | host | Rootless absent: get information about the leftovers"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: __testing_host_rootless_absent_leftovers
+  loop:
+    - "/home/timeruser/.config/systemd/user/timers.target.wants/podman-auto-update.timer"
+    - "/var/lib/systemd/linger/timeruser"
+
+- name: "Molecule | Verify | host | Rootless absent: assert the timer cannot come back"
+  ansible.builtin.assert:
+    that:
+      - not (item['stat']['exists'] | ansible.builtin.bool)
+    fail_msg: "state absent left '{{ item['item'] }}' behind; the timer would reactivate at the next login."
+    success_msg: "Neither the timer enablement symlink nor the linger flag survived."
+  loop: "{{ __testing_host_rootless_absent_leftovers['results'] }}"
+  loop_control:
+    label: "{{ item['item'] }}"
+
+- name: "Molecule | Verify | host | Rootless absent: remove the test account again"
+  ansible.builtin.user:
+    name: "timeruser"
+    state: "absent"
+    remove: true
+
+
 ## storage.conf / policy.json transition contract
 #
 # Supplying host_podman_storage / host_podman_policy replaces whole

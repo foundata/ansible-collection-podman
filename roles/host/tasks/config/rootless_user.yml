@@ -51,6 +51,48 @@
     - __host_podman_ru['state'] == 'absent'
   block:
 
+    # Stop and disable the per-user timer BEFORE lingering goes away: only a
+    # running user instance can remove the enablement symlink, and a
+    # surviving symlink would reactivate the timer at the account's next
+    # login. Tolerant of an unreachable user instance (never lingered, no
+    # runtime directory): there is no running timer to stop then, but the
+    # symlink is still removed root-side below.
+    - name: "Config | Rootless | Disable the per-user automatic image update timer of '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.systemd_service:
+        name: "{{ __host_podman_auto_update_timer_unit_name }}"
+        scope: "user"
+        state: "stopped"
+        enabled: false
+      become: true
+      become_user: "{{ __host_podman_ru['name'] }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ __host_podman_ru_absent_uid }}"
+        DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ __host_podman_ru_absent_uid }}/bus"
+      vars:
+        __host_podman_ru_absent_uid: "{{ ansible_facts['getent_passwd'][__host_podman_ru['name']][1] }}"
+      register: __host_podman_ru_timer_disable_result
+      failed_when:
+        - __host_podman_ru_timer_disable_result is ansible.builtin.failed
+        - >-
+          (__host_podman_ru_timer_disable_result['msg'] | ansible.builtin.default('') | ansible.builtin.lower)
+          is not ansible.builtin.search('not found|not loaded|could not be found|does not exist|failed to connect')
+      when:
+        - ansible_facts['getent_passwd'][__host_podman_ru['name']] is not ansible.builtin.none
+        - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+
+
+    # Root-side removal of the enablement symlink covers a user instance
+    # that was not reachable above.
+    - name: "Config | Rootless | Remove the timer enablement symlink of '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.file:
+        path: "{{ __host_podman_ru_home }}/.config/systemd/user/timers.target.wants/{{ __host_podman_auto_update_timer_unit_name }}"
+        state: "absent"
+      vars:
+        __host_podman_ru_home: "{{ ansible_facts['getent_passwd'][__host_podman_ru['name']][4] }}"
+      when:
+        - ansible_facts['getent_passwd'][__host_podman_ru['name']] is not ansible.builtin.none
+
+
     - name: "Config | Rootless | Disable lingering for '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.command:
         argv:
