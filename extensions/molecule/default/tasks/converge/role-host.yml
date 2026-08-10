@@ -26,6 +26,17 @@
     host_podman_containers:
       containers:
         log_driver: "journald"
+    # A registry entry with a nested mirror list: covers the array-of-inline-
+    # tables rendering (regression: nested mirror dictionaries were rendered
+    # as quoted Python reprs, producing invalid TOML). The fake prefix keeps
+    # real image pulls unaffected.
+    host_podman_registries:
+      registry:
+        - prefix: "registry.example.com"
+          location: "registry.example.com"
+          mirror:
+            - location: "mirror.example.com/reg"
+              insecure: false
     host_podman_auto_update_timer_settings:
       # Distinct from the vendor podman-auto-update.timer schedule (daily) so the
       # verify can prove the drop-in replaces it rather than accumulating.

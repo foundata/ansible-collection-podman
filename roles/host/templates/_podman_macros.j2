@@ -7,6 +7,11 @@
   - Numbers are rendered bare.
   - Strings are rendered double-quoted (backslashes and quotes get escaped).
   - Lists are rendered as inline arrays; each item is typed by the same rules.
+  - Dictionaries are rendered as inline tables ("{ key = value, ... }"),
+    recursively: a list of dictionaries inside a table entry (e.g. the
+    "mirror" list of a registries.conf "[[registry]]" entry) becomes an
+    array of inline tables, which TOML parsers treat exactly like nested
+    "[[registry.mirror]]" tables.
 -#}
 
 {%- macro render_toml_value(value) -%}
@@ -14,6 +19,9 @@
 {{ value | ansible.builtin.ternary('true', 'false') }}
 {%-   elif value is ansible.builtin.number -%}
 {{ value }}
+{#-   mappings BEFORE the sequence test: dicts pass Jinja's sequence test -#}
+{%-   elif value is ansible.builtin.mapping -%}
+{ {% for k, v in value.items() %}{{ k }} = {{ render_toml_value(v) }}{% if not loop.last %}, {% endif %}{% endfor %} }
 {%-   elif value is ansible.builtin.sequence and value is not ansible.builtin.string -%}
 [{% for item in value %}{{ render_toml_value(item) }}{% if not loop.last %}, {% endif %}{% endfor %}]
 {%-   else -%}

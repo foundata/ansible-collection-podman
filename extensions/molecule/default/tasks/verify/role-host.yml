@@ -1156,6 +1156,44 @@
         - "/var/lib/molecule-conflict-store"
 
 
+## Registries rendering (nested mirror tables)
+#
+# The earlier verify sections re-run the role without host_podman_registries,
+# which legitimately removes the drop-in again, so the fixture is re-applied
+# here instead of relying on the converge state.
+
+- name: "Molecule | Verify | host | Re-apply the registries fixture"
+  ansible.builtin.include_role:
+    name: "foundata.podman.host"
+  vars:
+    host_podman_registries:
+      registry:
+        - prefix: "registry.example.com"
+          location: "registry.example.com"
+          mirror:
+            - location: "mirror.example.com/reg"
+              insecure: false
+
+
+- name: "Molecule | Verify | host | Read the managed registries drop-in"
+  ansible.builtin.slurp:
+    src: "/etc/containers/registries.conf.d/50-managed.conf"
+  register: __testing_host_registries_slurp
+
+
+- name: "Molecule | Verify | host | Assert the nested mirror rendered as an inline table"
+  ansible.builtin.assert:
+    that:
+      - >-
+        (__testing_host_registries_slurp['content'] | ansible.builtin.b64decode)
+        is ansible.builtin.search('mirror = \[\{ location = "mirror\.example\.com/reg", insecure = false \}\]')
+    fail_msg: >-
+      The nested registry mirror did not render as a TOML array of inline
+      tables:
+      {{ __testing_host_registries_slurp['content'] | ansible.builtin.b64decode }}
+    success_msg: "Nested registry mirrors render as TOML arrays of inline tables."
+
+
 ## Check mode on the deployed host
 #
 # A --check run against the deployed host must succeed (regression: the
