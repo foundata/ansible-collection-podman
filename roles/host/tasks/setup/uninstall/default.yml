@@ -29,6 +29,39 @@
     label: "{{ __host_podman_ru_raw['name'] }}"
 
 
+# Accounts the role enabled earlier but that are no longer listed (possibly
+# already deleted) are found through their manifests, so "absent" really
+# removes everything the role ever created.
+- name: "Setup | Uninstall | Find the manifests of previously managed accounts"
+  ansible.builtin.find:
+    paths: "{{ __host_podman_rootless_manifest_dir_path }}"
+    patterns:
+      - "*.ansible-manifest"
+    file_type: "file"
+  register: __host_podman_uninstall_manifest_find
+
+
+- name: "Setup | Uninstall | Revert the rootless enablement of no longer listed accounts"
+  ansible.builtin.include_tasks:
+    file: "{{ role_path }}/tasks/config/rootless_user.yml"
+  vars:
+    __host_podman_ru_force_absent: true
+  loop: >-
+    {%- set __declared = host_podman_rootless_users | ansible.builtin.map(attribute='name') | ansible.builtin.list -%}
+    {%- set __ns = namespace(rows=[]) -%}
+    {%- for __f in (__host_podman_uninstall_manifest_find['files'] | ansible.builtin.default([])) -%}
+    {%-   set __name = __f['path'] | ansible.builtin.basename
+            | ansible.builtin.regex_replace('[.]ansible-manifest$', '') -%}
+    {%-   if __name not in __declared -%}
+    {%-     set _ = __ns.rows.append({'name': __name}) -%}
+    {%-   endif -%}
+    {%- endfor -%}
+    {{ __ns.rows }}
+  loop_control:
+    loop_var: "__host_podman_ru_raw"
+    label: "{{ __host_podman_ru_raw['name'] }}"
+
+
 # semanage rules cannot carry a marker; the manifest written by the config
 # tasks records the rules this role created, and an empty declared list
 # removes them all. With host_podman_selinux_manage set to false the role

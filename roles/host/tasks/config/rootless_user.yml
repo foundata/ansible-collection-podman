@@ -38,6 +38,41 @@
     - __host_podman_ru['state'] == 'present'
 
 
+# The manifest carries the home path the role used last time, so the removal
+# below also works for an account that has been deleted in the meantime (its
+# home is deliberately preserved by this role).
+- name: "Config | Rootless | Read the manifest of '{{ __host_podman_ru['name'] }}'"
+  ansible.builtin.slurp:
+    src: "{{ __host_podman_rootless_manifest_file_path }}"
+  register: __host_podman_ru_manifest_slurp
+  failed_when:
+    - __host_podman_ru_manifest_slurp['msg'] is ansible.builtin.defined
+    - "'file not found' not in (__host_podman_ru_manifest_slurp['msg'] | ansible.builtin.lower)"
+
+
+- name: "Config | Rootless | Determine the recorded state of '{{ __host_podman_ru['name'] }}'"
+  ansible.builtin.set_fact:
+    __host_podman_ru_manifest_old: >-
+      {{
+        (__host_podman_ru_manifest_slurp['content'] | ansible.builtin.default('')
+         | ansible.builtin.b64decode | ansible.builtin.from_yaml)
+        | ansible.builtin.default({}, true)
+      }}
+
+
+# The account's home wins while it exists (it is authoritative and may have
+# changed); the manifest covers the removed-account case. Empty when neither
+# knows a home, which skips the home-bound cleanup below.
+- name: "Config | Rootless | Determine the home directory of '{{ __host_podman_ru['name'] }}'"
+  ansible.builtin.set_fact:
+    __host_podman_ru_home_effective: >-
+      {{
+        ansible_facts['getent_passwd'][__host_podman_ru['name']][4]
+        if (ansible_facts['getent_passwd'][__host_podman_ru['name']] is not ansible.builtin.none)
+        else (__host_podman_ru_manifest_old['home'] | ansible.builtin.default(''))
+      }}
+
+
 - name: "Config | Rootless | Check whether lingering is enabled for '{{ __host_podman_ru['name'] }}'"
   ansible.builtin.stat:
     path: "{{ __host_podman_linger_dir_path }}/{{ __host_podman_ru['name'] }}"
@@ -85,12 +120,11 @@
     # that was not reachable above.
     - name: "Config | Rootless | Remove the timer enablement symlink of '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.file:
-        path: "{{ __host_podman_ru_home }}/.config/systemd/user/timers.target.wants/{{ __host_podman_auto_update_timer_unit_name }}"
+        path: >-
+          {{ __host_podman_ru_home_effective }}/.config/systemd/user/timers.target.wants/{{ __host_podman_auto_update_timer_unit_name }}
         state: "absent"
-      vars:
-        __host_podman_ru_home: "{{ ansible_facts['getent_passwd'][__host_podman_ru['name']][4] }}"
       when:
-        - ansible_facts['getent_passwd'][__host_podman_ru['name']] is not ansible.builtin.none
+        - (__host_podman_ru_home_effective | ansible.builtin.length) > 0
 
 
     - name: "Config | Rootless | Disable lingering for '{{ __host_podman_ru['name'] }}'"
@@ -102,22 +136,38 @@
       changed_when: true
       when:
         - __host_podman_ru_linger_stat['stat']['exists']
+        - ansible_facts['getent_passwd'][__host_podman_ru['name']] is not ansible.builtin.none
+
+
+    # loginctl cannot resolve a removed account, so its leftover flag file is
+    # dropped directly (root-owned, outside the account's tree).
+    - name: "Config | Rootless | Remove the lingering flag of the removed account '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.file:
+        path: "{{ __host_podman_linger_dir_path }}/{{ __host_podman_ru['name'] }}"
+        state: "absent"
+      when:
+        - __host_podman_ru_linger_stat['stat']['exists']
+        - ansible_facts['getent_passwd'][__host_podman_ru['name']] is ansible.builtin.none
 
 
     - name: "Config | Rootless | Remove managed per-user configuration files of '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.file:
-        path: "{{ __host_podman_ru_home }}/{{ __host_podman_user_config_dir_relpath }}/{{ item }}"
+        path: "{{ __host_podman_ru_home_effective }}/{{ __host_podman_user_config_dir_relpath }}/{{ item }}"
         state: "absent"
-      vars:
-        __host_podman_ru_home: "{{ ansible_facts['getent_passwd'][__host_podman_ru['name']][4] }}"
       when:
-        - ansible_facts['getent_passwd'][__host_podman_ru['name']] is not ansible.builtin.none
+        - (__host_podman_ru_home_effective | ansible.builtin.length) > 0
       loop:
         - "containers.conf"
         - "storage.conf"
         - "registries.conf"
       loop_control:
         label: "{{ item }}"
+
+
+    - name: "Config | Rootless | Remove the manifest of '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.file:
+        path: "{{ __host_podman_rootless_manifest_file_path }}"
+        state: "absent"
 
     # Subordinate ID ranges and the account itself are deliberately kept
     # (shared account properties; removing them is out of scope, see the
@@ -157,13 +207,13 @@
         __host_podman_ru_subuid_line_count: >-
           {{
             __host_podman_ru_subid_content[0].splitlines()
-            | ansible.builtin.select('match', '^' ~ (__host_podman_ru['name'] | ansible.builtin.regex_escape) ~ ':')
+            | ansible.builtin.select('ansible.builtin.match', '^' ~ (__host_podman_ru['name'] | ansible.builtin.regex_escape) ~ ':')
             | ansible.builtin.length
           }}
         __host_podman_ru_subgid_line_count: >-
           {{
             __host_podman_ru_subid_content[1].splitlines()
-            | ansible.builtin.select('match', '^' ~ (__host_podman_ru['name'] | ansible.builtin.regex_escape) ~ ':')
+            | ansible.builtin.select('ansible.builtin.match', '^' ~ (__host_podman_ru['name'] | ansible.builtin.regex_escape) ~ ':')
             | ansible.builtin.length
           }}
         # Next free range start: the highest end of all existing ranges in both
@@ -439,3 +489,31 @@
         - __host_podman_ru['linger'] | ansible.builtin.bool
         - host_podman_service_state != 'unmanaged'
         - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+
+
+    ## Ownership record (see __host_podman_rootless_manifest_dir_path)
+
+    - name: "Config | Rootless | Ensure the manifest directory exists"
+      ansible.builtin.file:
+        path: "{{ __host_podman_rootless_manifest_dir_path }}"
+        state: "directory"
+        owner: "root"
+        group: "root"
+        mode: "u=rwx,g=,o=" # 0700
+
+
+    # Written last so it only records what the run above actually ensured.
+    - name: "Config | Rootless | Record the managed home in the manifest of '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.copy:
+        content: |
+          {{ __host_podman_file_marker }}
+          {{ __host_podman_ru_manifest_data | ansible.builtin.to_nice_yaml(indent=2) }}
+        dest: "{{ __host_podman_rootless_manifest_file_path }}"
+        owner: "root"
+        group: "root"
+        mode: "u=rw,g=,o=" # 0600
+      vars:
+        __host_podman_ru_manifest_data:
+          # recorded so a later removal can clean the managed files even when
+          # the account (whose passwd entry holds this path) is already gone
+          home: "{{ __host_podman_ru_home }}"

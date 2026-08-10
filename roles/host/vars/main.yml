@@ -335,6 +335,20 @@ __host_podman_subid_file_group: "root"
 __host_podman_subid_file_mode: "u=rw,g=r,o=r" # 0644
 
 
+# Per-account manifest recording what the role created inside a rootless
+# account's home. The paths derive from the account's home directory, which
+# is only readable from passwd while the account exists: without this record
+# a removed account (home deliberately preserved) would leave the managed
+# configuration and the timer enablement symlink behind forever.
+#
+# Root-owned and OUTSIDE the account's writable tree on purpose: the recorded
+# paths are removed with root privileges later, so a manifest the account
+# could edit would turn into an arbitrary-deletion primitive.
+__host_podman_rootless_manifest_dir_path: "/var/lib/ansible-podman-host/rootless"
+__host_podman_rootless_manifest_file_path: >-
+  {{ __host_podman_rootless_manifest_dir_path }}/{{ __host_podman_ru['name'] }}.ansible-manifest
+
+
 # Flag files systemd-logind maintains for lingering users; used for an
 # idempotent check as "loginctl show-user" fails for users without an active
 # session or lingering.

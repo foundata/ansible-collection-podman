@@ -593,7 +593,11 @@ account must already exist.
 `present` ensures the rootless enablement for this account,
 `absent` reverts it (disables lingering and the per-user timer,
 removes the per-user configuration managed by this role; subordinate
-ID ranges and the account itself are kept).
+ID ranges and the account itself are kept). The removal also works
+when the account has been deleted in the meantime and its home was
+preserved: the role records the managed home in a root-owned
+manifest below `/var/lib/ansible-podman-host/`. The home directory
+itself and its remaining content are never deleted.
 
 - **Type**: `str`
 - **Required**: No

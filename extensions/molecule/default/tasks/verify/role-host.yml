@@ -704,6 +704,134 @@
     remove: true
 
 
+## Rootless removal after the account was deleted
+#
+# Regression: the managed paths below the account's home were derived from
+# passwd, so removing an account first (its home is deliberately preserved)
+# left the configuration, the timer enablement symlink and the linger flag
+# behind forever. The home is recorded in a root-owned manifest now.
+
+- name: "Molecule | Verify | host | Account gone: create a dedicated test account"
+  ansible.builtin.user:
+    name: "goneuser"
+    create_home: true
+
+
+- name: "Molecule | Verify | host | Account gone: enable the account for rootless Podman"
+  ansible.builtin.include_role:
+    name: "foundata.podman.host"
+  vars:
+    host_podman_rootless_users:
+      - name: "goneuser"
+        subuid: "60000:20000"
+        subgid: "60000:20000"
+        containers:
+          containers:
+            log_driver: "journald"
+
+
+- name: "Molecule | Verify | host | Account gone: get information about the managed resources"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: __testing_host_gone_before
+  loop:
+    - "/home/goneuser/.config/containers/containers.conf"
+    - "/home/goneuser/.config/systemd/user/timers.target.wants/podman-auto-update.timer"
+    - "/var/lib/systemd/linger/goneuser"
+    - "/var/lib/ansible-podman-host/rootless/goneuser.ansible-manifest"
+
+
+- name: "Molecule | Verify | host | Account gone: assert the resources and the root-owned manifest exist"
+  ansible.builtin.assert:
+    that:
+      - __testing_host_gone_before['results'] | ansible.builtin.map(attribute='stat.exists') | ansible.builtin.min
+      - __testing_host_gone_before['results'][3]['stat']['pw_name'] == 'root'
+      - __testing_host_gone_before['results'][3]['stat']['mode'] == '0600'
+    fail_msg: >-
+      The rootless enablement did not create all managed resources
+      ({{ __testing_host_gone_before['results'] | ansible.builtin.map(attribute='item') | ansible.builtin.list }}).
+    success_msg: "The managed resources exist and the manifest is root-owned and not world-readable."
+
+
+# Lingering keeps a "systemd --user" manager running, which makes userdel
+# refuse; an administrator terminates it first. The linger FLAG is left in
+# place on purpose: it is one of the leftovers the role has to clean up.
+- name: "Molecule | Verify | host | Account gone: terminate the user manager"
+  ansible.builtin.shell:
+    cmd: |
+      set -u
+      __uid="$(id -u goneuser)"
+      loginctl terminate-user goneuser || true
+      systemctl stop "user@${__uid}.service" || true
+      systemctl stop "user-runtime-dir@${__uid}.service" || true
+      for __i in $(seq 1 30); do
+        pgrep -u goneuser >/dev/null 2>&1 || break
+        sleep 1
+      done
+      pgrep -u goneuser >/dev/null 2>&1 && exit 1
+      exit 0
+  args:
+    executable: "/bin/bash"
+  changed_when:
+    - true
+
+
+# remove: false keeps the home, which is what makes the leftovers observable
+- name: "Molecule | Verify | host | Account gone: delete the account but keep its home"
+  ansible.builtin.user:
+    name: "goneuser"
+    state: "absent"
+    remove: false
+
+
+- name: "Molecule | Verify | host | Account gone: remove the rootless enablement of the deleted account"
+  ansible.builtin.include_role:
+    name: "foundata.podman.host"
+  vars:
+    host_podman_rootless_users:
+      - name: "goneuser"
+        state: "absent"
+        subuid: "60000:20000"
+        subgid: "60000:20000"
+
+
+- name: "Molecule | Verify | host | Account gone: get information about the leftovers"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: __testing_host_gone_after
+  loop:
+    - "/home/goneuser/.config/containers/containers.conf"
+    - "/home/goneuser/.config/systemd/user/timers.target.wants/podman-auto-update.timer"
+    - "/var/lib/systemd/linger/goneuser"
+    - "/var/lib/ansible-podman-host/rootless/goneuser.ansible-manifest"
+    # the account's data is not the role's to delete
+    - "/home/goneuser"
+
+
+- name: "Molecule | Verify | host | Account gone: assert every managed resource was removed"
+  ansible.builtin.assert:
+    that:
+      - not (__testing_host_gone_after['results'][0]['stat']['exists'] | ansible.builtin.bool)
+      - not (__testing_host_gone_after['results'][1]['stat']['exists'] | ansible.builtin.bool)
+      - not (__testing_host_gone_after['results'][2]['stat']['exists'] | ansible.builtin.bool)
+      - not (__testing_host_gone_after['results'][3]['stat']['exists'] | ansible.builtin.bool)
+      - __testing_host_gone_after['results'][4]['stat']['exists'] | ansible.builtin.bool
+    fail_msg: >-
+      Removing a deleted account left managed resources behind, or deleted the
+      preserved home
+      ({{ __testing_host_gone_after['results']
+          | ansible.builtin.map(attribute='stat.exists') | ansible.builtin.list }}).
+    success_msg: >-
+      The managed configuration, timer symlink, linger flag and manifest of a
+      deleted account are removed; its home stays untouched.
+
+
+- name: "Molecule | Verify | host | Account gone: remove the preserved home again"
+  ansible.builtin.file:
+    path: "/home/goneuser"
+    state: "absent"
+
+
 ## storage.conf / policy.json transition contract
 #
 # Supplying host_podman_storage / host_podman_policy replaces whole
