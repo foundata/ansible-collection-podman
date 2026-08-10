@@ -900,10 +900,14 @@
     owner: "root"
     group: "root"
     mode: "u=rwx,g=,o=" # 0700
+  # the same predicate as the manifest write below: a units-only application
+  # records its unit directories and service names too
   when: >-
     ((__quadlet_podman_secret_names_declared | ansible.builtin.length) > 0)
     or ((__quadlet_podman_file_dests_declared | ansible.builtin.length) > 0)
     or ((__quadlet_podman_registries_declared | ansible.builtin.length) > 0)
+    or ((quadlet_podman_units | ansible.builtin.length) > 0)
+    or ((quadlet_podman_systemd_units | ansible.builtin.length) > 0)
 
 
 - name: "Config | Default | Record the application's resources in the manifest"

@@ -1420,6 +1420,20 @@
 # Enablement transition: removing the Install section together with state
 # "running" must remove the old enablement symlink (regression: the
 # enablement was simply left untouched without an Install section).
+# Fresh-scope fixture: with every earlier application removed the scope
+# directory may be empty; removing it makes this units-only deployment prove
+# the manifest directory is (re)created for units too (regression: the
+# directory predicate lagged behind the manifest-write predicate and a fresh
+# units-only application failed after writing its units).
+- name: "Molecule | Verify | quadlet | Transition: remove the empty manifest scope directory"
+  ansible.builtin.command:
+    argv: ["rmdir", "/var/lib/ansible-podman-quadlet/system"]
+  changed_when:
+    - true
+  failed_when:
+    - false
+
+
 - name: "Molecule | Verify | quadlet | Transition: deploy an enabled plain unit with Install"
   ansible.builtin.include_role:
     name: "foundata.podman.quadlet"
