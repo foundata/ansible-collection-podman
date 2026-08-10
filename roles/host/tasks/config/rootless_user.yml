@@ -375,6 +375,7 @@
         owner: "{{ __host_podman_ru['name'] }}"
         group: "{{ __host_podman_ru_gid }}"
         mode: "{{ __host_podman_user_config_file_mode }}"
+        validate: "{{ __host_podman_toml_validate_command }}"
       vars:
         # Pass (and/or adjust) variables needed for the template
         tpl_containers_settings: "{{ __host_podman_ru['containers'] }}"

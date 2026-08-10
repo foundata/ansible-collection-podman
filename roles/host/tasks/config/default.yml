@@ -70,6 +70,7 @@
     owner: "{{ __host_podman_config_file_owner }}"
     group: "{{ __host_podman_config_file_group }}"
     mode: "{{ __host_podman_config_file_mode }}"
+    validate: "{{ __host_podman_toml_validate_command }}"
   vars:
     # Pass (and/or adjust) variables needed for the template
     tpl_containers_settings: "{{ __host_podman_containers_effective }}"
@@ -104,6 +105,7 @@
     owner: "{{ __host_podman_config_file_owner }}"
     group: "{{ __host_podman_config_file_group }}"
     mode: "{{ __host_podman_config_file_mode }}"
+    validate: "{{ __host_podman_toml_validate_command }}"
   vars:
     # Pass (and/or adjust) variables needed for the template
     tpl_registries_settings: "{{ __host_podman_registries_effective }}"
@@ -183,6 +185,7 @@
     owner: "{{ __host_podman_config_file_owner }}"
     group: "{{ __host_podman_config_file_group }}"
     mode: "{{ __host_podman_config_file_mode }}"
+    validate: "{{ __host_podman_toml_validate_command }}"
   vars:
     # Pass (and/or adjust) variables needed for the template
     tpl_storage_settings: "{{ __host_podman_storage_effective }}"

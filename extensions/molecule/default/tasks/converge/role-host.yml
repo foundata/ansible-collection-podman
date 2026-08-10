@@ -13,7 +13,7 @@
     password: "!"
 
 
-- name: "Molecule | Converge | Include the foundata.podman.host role"
+- name: "Molecule | Converge | Include the foundata.podman.host role" # noqa: no-tabs (deliberate escaping stress fixture)
   ansible.builtin.include_role:
     name: "foundata.podman.host"
   vars:
@@ -26,6 +26,12 @@
     host_podman_containers:
       containers:
         log_driver: "journald"
+        # Escaping stress for the TOML renderer (regression: only quotes and
+        # backslashes were escaped, so e.g. a newline produced an unparseable
+        # file). An annotation is inert container metadata, safe to carry the
+        # awkward characters in a live configuration.
+        annotation:
+          - "molecule.toml.stress=quote\" backslash\\ tab\t newline\n end"
     # A registry entry with a nested mirror list: covers the array-of-inline-
     # tables rendering (regression: nested mirror dictionaries were rendered
     # as quoted Python reprs, producing invalid TOML). The fake prefix keeps

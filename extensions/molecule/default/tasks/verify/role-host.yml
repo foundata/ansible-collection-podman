@@ -1156,13 +1156,13 @@
         - "/var/lib/molecule-conflict-store"
 
 
-## Registries rendering (nested mirror tables)
+## TOML rendering (nested mirror tables, escaping, parseability)
 #
-# The earlier verify sections re-run the role without host_podman_registries,
-# which legitimately removes the drop-in again, so the fixture is re-applied
+# The earlier verify sections re-run the role without these settings, which
+# legitimately removes the drop-ins again, so the fixtures are re-applied
 # here instead of relying on the converge state.
 
-- name: "Molecule | Verify | host | Re-apply the registries fixture"
+- name: "Molecule | Verify | host | Re-apply the registries and containers fixtures" # noqa: no-tabs (deliberate escaping stress fixture)
   ansible.builtin.include_role:
     name: "foundata.podman.host"
   vars:
@@ -1173,6 +1173,11 @@
           mirror:
             - location: "mirror.example.com/reg"
               insecure: false
+    host_podman_containers:
+      containers:
+        log_driver: "journald"
+        annotation:
+          - "molecule.toml.stress=quote\" backslash\\ tab\t newline\n end"
 
 
 - name: "Molecule | Verify | host | Read the managed registries drop-in"
@@ -1192,6 +1197,53 @@
       tables:
       {{ __testing_host_registries_slurp['content'] | ansible.builtin.b64decode }}
     success_msg: "Nested registry mirrors render as TOML arrays of inline tables."
+
+
+# Every rendered TOML file must be parseable; the stress annotation must
+# round-trip byte-exact (regression: incomplete string escaping, unquoted
+# keys).
+- name: "Molecule | Verify | host | Get information about all rendered TOML files"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: __testing_host_toml_stat
+  loop:
+    - "/etc/containers/containers.conf.d/50-managed.conf"
+    - "/etc/containers/registries.conf.d/50-managed.conf"
+    - "/etc/containers/storage.conf"
+    - "/home/containerapp/.config/containers/containers.conf"
+    - "/home/containerapp/.config/containers/storage.conf"
+    - "/home/containerapp/.config/containers/registries.conf"
+
+
+- name: "Molecule | Verify | host | Parse every rendered TOML file"
+  ansible.builtin.command:
+    argv:
+      - "/usr/bin/python3"
+      - "-c"
+      - "import tomllib, json, sys; print(json.dumps(tomllib.load(open(sys.argv[1], 'rb'))))"
+      - "{{ item['item'] }}"
+  changed_when:
+    - false
+  when:
+    - item['stat']['exists'] | ansible.builtin.bool
+  loop: "{{ __testing_host_toml_stat['results'] }}"
+  loop_control:
+    label: "{{ item['item'] }}"
+  register: __testing_host_toml_parse
+
+
+- name: "Molecule | Verify | host | Assert the stress annotation round-trips byte-exact" # noqa: no-tabs (deliberate escaping stress fixture)
+  ansible.builtin.assert:
+    that:
+      - "__testing_host_toml_stress in __testing_host_toml_parsed['containers']['annotation']"
+    fail_msg: >-
+      The stress annotation did not survive the TOML round-trip:
+      {{ __testing_host_toml_parsed['containers']['annotation'] | ansible.builtin.default([]) }}
+    success_msg: "Awkward characters in setting values survive the TOML round-trip byte-exact."
+  vars:
+    __testing_host_toml_stress: "molecule.toml.stress=quote\" backslash\\ tab\t newline\n end"
+    __testing_host_toml_parsed: >-
+      {{ (__testing_host_toml_parse['results'][0]['stdout'] | ansible.builtin.from_json) }}
 
 
 ## Check mode on the deployed host

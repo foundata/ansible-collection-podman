@@ -352,6 +352,12 @@ __host_podman_user_config_file_mode: "u=rw,g=,o=" # 0600
 ### Executable paths (never hard-coded inline; override per platform if needed)
 
 __host_podman_podman_exec_path: "/usr/bin/podman"
+
+# Every rendered TOML file is parsed before it is installed (template
+# validate): the renderer refuses nothing itself, so unserializable input
+# (e.g. exotic control characters) must never end up in a live file.
+__host_podman_toml_validate_command: >-
+  /usr/bin/python3 -c 'import tomllib; tomllib.load(open("%s", "rb"))'
 __host_podman_loginctl_exec_path: "/usr/bin/loginctl"
 __host_podman_restorecon_exec_path: "/usr/sbin/restorecon"
 __host_podman_grep_exec_path: "/usr/bin/grep"

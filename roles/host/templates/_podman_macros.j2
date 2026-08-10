@@ -5,14 +5,43 @@
   Value typing rules (TOML):
   - Booleans are rendered as true/false.
   - Numbers are rendered bare.
-  - Strings are rendered double-quoted (backslashes and quotes get escaped).
+  - Strings are rendered double-quoted; backslashes, quotes, newlines, tabs
+    and carriage returns get escaped. Other control characters are NOT
+    representable here - the tasks rendering these templates parse the
+    result with tomllib (template validate), so such input is rejected
+    instead of silently producing a broken file.
+  - Keys (including table names) are rendered bare only when TOML allows it
+    (A-Z, a-z, 0-9, "-", "_"); anything else becomes a quoted key. Unquoted,
+    a key containing a dot would silently inject nested structure.
   - Lists are rendered as inline arrays; each item is typed by the same rules.
   - Dictionaries are rendered as inline tables ("{ key = value, ... }"),
     recursively: a list of dictionaries inside a table entry (e.g. the
     "mirror" list of a registries.conf "[[registry]]" entry) becomes an
     array of inline tables, which TOML parsers treat exactly like nested
     "[[registry.mirror]]" tables.
+  - Top-level lists render as "[[key]]" arrays of tables only when EVERY
+    member is a dictionary; mixed lists render as (valid, heterogeneous)
+    inline arrays instead of crashing on the first non-dictionary member.
 -#}
+
+{%- macro escape_toml_string(value) -%}
+{{ value | ansible.builtin.string
+   | ansible.builtin.replace('\\', '\\\\')
+   | ansible.builtin.replace('"', '\\"')
+   | ansible.builtin.replace('\n', '\\n')
+   | ansible.builtin.replace('\t', '\\t')
+   | ansible.builtin.replace('\r', '\\r') }}
+{%- endmacro -%}
+
+
+{%- macro render_toml_key(key) -%}
+{%-   if key is ansible.builtin.match('^[A-Za-z0-9_-]+$') -%}
+{{ key }}
+{%-   else -%}
+"{{ escape_toml_string(key) }}"
+{%-   endif -%}
+{%- endmacro -%}
+
 
 {%- macro render_toml_value(value) -%}
 {%-   if value is ansible.builtin.boolean -%}
@@ -21,11 +50,11 @@
 {{ value }}
 {#-   mappings BEFORE the sequence test: dicts pass Jinja's sequence test -#}
 {%-   elif value is ansible.builtin.mapping -%}
-{ {% for k, v in value.items() %}{{ k }} = {{ render_toml_value(v) }}{% if not loop.last %}, {% endif %}{% endfor %} }
+{ {% for k, v in value.items() %}{{ render_toml_key(k) }} = {{ render_toml_value(v) }}{% if not loop.last %}, {% endif %}{% endfor %} }
 {%-   elif value is ansible.builtin.sequence and value is not ansible.builtin.string -%}
 [{% for item in value %}{{ render_toml_value(item) }}{% if not loop.last %}, {% endif %}{% endfor %}]
 {%-   else -%}
-"{{ value | ansible.builtin.string | ansible.builtin.replace('\\', '\\\\') | ansible.builtin.replace('"', '\\"') }}"
+"{{ escape_toml_string(value) }}"
 {%-   endif -%}
 {%- endmacro -%}
 
@@ -33,15 +62,16 @@
 {#-
   Render one TOML table ("[name]" section): scalar and list values first,
   nested dictionaries recursively as dotted sub-tables ("[name.sub]").
+  "name" must already be rendered (quoted where needed, see the call sites).
 -#}
 {%- macro render_toml_section(name, data) -%}
 [{{ name }}]
 {%  for key, value in data.items() if value is not ansible.builtin.mapping %}
-{{ key }} = {{ render_toml_value(value) }}
+{{ render_toml_key(key) }} = {{ render_toml_value(value) }}
 {%  endfor %}
 {%- for key, value in data.items() if value is ansible.builtin.mapping %}
 
-{{ render_toml_section(name ~ '.' ~ key, value) }}
+{{ render_toml_section(name ~ '.' ~ render_toml_key(key), value) }}
 {%- endfor -%}
 {%- endmacro -%}
 
@@ -51,8 +81,8 @@
   1. Top-level scalar/list keys (e.g. "unqualified-search-registries") first,
      as TOML requires them before any table header.
   2. Dictionary values as "[key]" tables (recursing into "[key.sub]").
-  3. Lists of dictionaries as "[[key]]" arrays of tables (e.g. "registry"
-     mirror entries in registries.conf).
+  3. Lists whose members are ALL dictionaries as "[[key]]" arrays of tables
+     (e.g. "registry" entries in registries.conf).
 -#}
 {%- macro render_toml(data) -%}
 {#-   Note: Jinja's "sequence" test also matches mappings, so every list check
@@ -60,22 +90,26 @@
 {%-   for key, value in data.items()
         if (value is not ansible.builtin.mapping)
         and not (value is ansible.builtin.sequence and value is not ansible.builtin.string
-                 and (value | ansible.builtin.length) > 0 and value[0] is ansible.builtin.mapping) %}
-{{ key }} = {{ render_toml_value(value) }}
+                 and (value | ansible.builtin.length) > 0
+                 and (value | ansible.builtin.select('ansible.builtin.mapping') | ansible.builtin.length)
+                     == (value | ansible.builtin.length)) %}
+{{ render_toml_key(key) }} = {{ render_toml_value(value) }}
 {%    endfor %}
 {%- for key, value in data.items() if value is ansible.builtin.mapping %}
 
-{{ render_toml_section(key, value) }}
+{{ render_toml_section(render_toml_key(key), value) }}
 {%- endfor -%}
 {%- for key, value in data.items()
       if (value is not ansible.builtin.mapping)
       and (value is ansible.builtin.sequence and value is not ansible.builtin.string
-           and (value | ansible.builtin.length) > 0 and value[0] is ansible.builtin.mapping) %}
+           and (value | ansible.builtin.length) > 0
+           and (value | ansible.builtin.select('ansible.builtin.mapping') | ansible.builtin.length)
+               == (value | ansible.builtin.length)) %}
 {%-   for entry in value %}
 
-[[{{ key }}]]
+[[{{ render_toml_key(key) }}]]
 {%      for entry_key, entry_value in entry.items() %}
-{{ entry_key }} = {{ render_toml_value(entry_value) }}
+{{ render_toml_key(entry_key) }} = {{ render_toml_value(entry_value) }}
 {%      endfor %}
 {%-   endfor -%}
 {%- endfor -%}
