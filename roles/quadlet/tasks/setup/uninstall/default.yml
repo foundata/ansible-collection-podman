@@ -378,53 +378,14 @@
         loop_var: "__quadlet_podman_secret_name"
 
 
-    # All applications of a scope share one authfile, so a logout for this
-    # application would also cut off every other application still using the
-    # same registry (until its next run re-creates the login). The manifests
-    # of the other applications (read at the top of this file) decide which
-    # registries are actually safe to log out of.
-    # Removes the registry's credentials from the (per-scope, shared)
-    # authfile. Registries that the manifest of another application in this
-    # scope still declares are skipped: logging them out here would break that
-    # application's image pulls until its next run.
-    - name: "Setup | Uninstall | Log out of the container registries of the application"
-      containers.podman.podman_logout:
-        registry: "{{ __quadlet_podman_registry }}"
-        authfile: "{{ __quadlet_podman_authfile_path }}"
-        executable: "{{ __quadlet_podman_podman_exec_path }}"
-      become: true
-      become_user: "{{ __quadlet_podman_become_user }}"
-      environment: "{{ __quadlet_podman_task_environment }}"
-      register: __quadlet_podman_logout_result
-      failed_when:
-        # tolerate already-removed credentials or a missing authfile
-        - __quadlet_podman_logout_result is ansible.builtin.failed
-        - >-
-          (__quadlet_podman_logout_result['msg'] | ansible.builtin.default('') | ansible.builtin.lower)
-          is not ansible.builtin.search('not logged in|no such file')
-      when:
-        - __quadlet_podman_exec_stat['stat']['exists']
-      vars:
-        __quadlet_podman_registries_other_apps: >-
-          {%- set __registries = [] -%}
-          {%- for __result in (__quadlet_podman_other_manifests_slurp['results'] | ansible.builtin.default([])) -%}
-          {%-   set __manifest = ((__result['content'] | ansible.builtin.default('') | ansible.builtin.b64decode
-                                   | ansible.builtin.from_yaml) | ansible.builtin.default({}, true)) -%}
-          {%-   for __registry in (__manifest['registries'] | ansible.builtin.default([])) -%}
-          {%-     set _ = __registries.append(__registry) -%}
-          {%-   endfor -%}
-          {%- endfor -%}
-          {{ __registries }}
-      loop: >-
-        {{
-          ((__quadlet_podman_manifest_old['registries'] | ansible.builtin.default([]))
-           + __quadlet_podman_registries_declared)
-          | ansible.builtin.unique
-          | ansible.builtin.reject('ansible.builtin.in', __quadlet_podman_registries_other_apps)
-          | ansible.builtin.list
-        }}
-      loop_control:
-        loop_var: "__quadlet_podman_registry"
+    # The application's own authentication file is removed as a whole;
+    # credential isolation makes cross-application guards unnecessary.
+    # Legacy logins in a scope-shared auth.json are deliberately not touched
+    # (see vars/main.yml).
+    - name: "Setup | Uninstall | Remove the authentication file of the application"
+      ansible.builtin.file:
+        path: "{{ __quadlet_podman_authfile_path }}"
+        state: "absent"
 
 
 # Root-side unit file cleanup for a vanished rootless account: the unit
@@ -469,6 +430,14 @@
         - __quadlet_podman_orphan_owned_result['rc'] not in [0, 1, 2]
       when:
         - (__quadlet_podman_orphan_find_result['files'] | ansible.builtin.length) > 0
+
+
+    - name: "Setup | Uninstall | Remove the recorded authentication file (account already removed)"
+      ansible.builtin.file:
+        path: "{{ __quadlet_podman_manifest_old['authfile'] }}"
+        state: "absent"
+      when:
+        - __quadlet_podman_manifest_old['authfile'] is ansible.builtin.defined
 
 
     - name: "Setup | Uninstall | Remove the orphaned unit files of the application"

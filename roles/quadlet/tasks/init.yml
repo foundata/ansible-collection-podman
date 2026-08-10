@@ -218,6 +218,28 @@
             (volume, network, image, build, artifact) start on demand as
             dependencies and are only managed when a unit opts in via
             Install or an explicit per-unit service_state. -#}
+      {#-   With declared registry credentials the per-application
+            authentication file is injected: REGISTRY_AUTH_FILE covers the
+            startup pulls of every generated service, and AutoUpdate=registry
+            containers additionally get the io.containers.autoupdate.authfile
+            label (podman-auto-update runs independently of the service and
+            inspects the running container). Conflicting user-supplied values
+            are rejected after this build. -#}
+      {%-   if (quadlet_podman_registry_auth | ansible.builtin.length) > 0 -%}
+      {%-     set __svc = __sns.sections.get('Service', {}) -%}
+      {%-     set __env = __svc.get('Environment', []) -%}
+      {%-     set __env = ([__env] if (__env is ansible.builtin.string) else (__env | ansible.builtin.list)) -%}
+      {%-     set __svc = __svc | ansible.builtin.combine({'Environment': __env + ['REGISTRY_AUTH_FILE=' ~ __quadlet_podman_authfile_path]}) -%}
+      {%-     set __sns.sections = __sns.sections | ansible.builtin.combine({'Service': __svc}) -%}
+      {%-     if __type == 'container'
+                and ((__sns.sections.get('Container', {}).get('AutoUpdate', '') | ansible.builtin.string) == 'registry') -%}
+      {%-       set __cont = __sns.sections['Container'] -%}
+      {%-       set __lbl = __cont.get('Label', []) -%}
+      {%-       set __lbl = ([__lbl] if (__lbl is ansible.builtin.string) else (__lbl | ansible.builtin.list)) -%}
+      {%-       set __cont = __cont | ansible.builtin.combine({'Label': __lbl + ['io.containers.autoupdate.authfile=' ~ __quadlet_podman_authfile_path]}) -%}
+      {%-       set __sns.sections = __sns.sections | ansible.builtin.combine({'Container': __cont}) -%}
+      {%-     endif -%}
+      {%-   endif -%}
       {#-   Quadlet's ServiceName= (in the type section) overrides the
             generated service name; the role's service management, dependency
             expansion and cleanup have to follow it. -#}
@@ -268,6 +290,38 @@
       ServiceName setting must not itself end in '.service' (the suffix is
       appended automatically).
     quiet: true
+
+
+# With declared credentials the role owns these two settings; a
+# user-supplied value would silently win or lose depending on ordering.
+- name: "Init | Check no unit overrides the application authentication file"
+  ansible.builtin.assert:
+    that:
+      - (__quadlet_podman_authfile_conflicts | ansible.builtin.length) == 0
+    fail_msg: >-
+      The unit(s)
+      [{{ __quadlet_podman_authfile_conflicts | ansible.builtin.join(', ') }}]
+      set REGISTRY_AUTH_FILE or the io.containers.autoupdate.authfile label
+      themselves while quadlet_podman_registry_auth is declared; the role
+      injects the application's own authentication file there. Remove the
+      conflicting setting (or the registry declaration).
+    quiet: true
+  vars:
+    __quadlet_podman_authfile_conflicts: >-
+      {%- set __ns = namespace(names=[]) -%}
+      {%- for __u in __quadlet_podman_units_effective -%}
+      {%-   set __envs = __u['sections'].get('Service', {}).get('Environment', []) -%}
+      {%-   set __envs = ([__envs] if (__envs is ansible.builtin.string) else (__envs | ansible.builtin.list)) -%}
+      {%-   set __lbls = __u['sections'].get(__u['type'] | ansible.builtin.capitalize, {}).get('Label', []) -%}
+      {%-   set __lbls = ([__lbls] if (__lbls is ansible.builtin.string) else (__lbls | ansible.builtin.list)) -%}
+      {%-   if ((__envs | ansible.builtin.select('ansible.builtin.match', 'REGISTRY_AUTH_FILE=') | ansible.builtin.length) > 1)
+            or ((__lbls | ansible.builtin.select('ansible.builtin.match', 'io\.containers\.autoupdate\.authfile=') | ansible.builtin.length) > 1) -%}
+      {%-     set _ = __ns.names.append(__u['name']) -%}
+      {%-   endif -%}
+      {%- endfor -%}
+      {{ __ns.names }}
+  when:
+    - (quadlet_podman_registry_auth | ansible.builtin.length) > 0
 
 
 - name: "Init | Build the unit name to generated service name map"

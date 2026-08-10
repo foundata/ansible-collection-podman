@@ -742,27 +742,55 @@
     success_msg: "De-listed run-once and timer units were removed and stopped."
 
 
-## Registry logout reconciliation (offline)
+## Registry credential reconciliation (offline, per-application authfiles)
 #
 # podman logout only edits the authentication file, so the reconciliation can
-# be verified without a reachable registry: craft authfile entries, record
-# the registries in the manifest, run the role without quadlet_podman_registry_auth
-# and expect exactly the unclaimed entry to be logged out again. A second
-# application's manifest claims one of the registries: all applications of a
-# scope share the authfile, so a registry another application still declares
-# must survive the logout (its image pulls would break otherwise).
+# be verified without a reachable registry: craft per-application authfiles
+# and manifests, run the role without quadlet_podman_registry_auth and expect
+# the de-listed entry to leave exactly this application's file. A second
+# application holds a DIFFERENT credential for the SAME registry and must
+# stay byte-identical (per-application isolation), and a legacy scope-shared
+# auth.json must never be touched (migration contract).
 
-- name: "Molecule | Verify | quadlet | Logout: craft two authfile entries"
+- name: "Molecule | Verify | quadlet | Logout: craft the legacy scope-shared authfile"
   ansible.builtin.copy:
     content: |
-      {"auths": {"registry.molecule.invalid": {"auth": "dGVzdDp0ZXN0"}, "registry-shared.molecule.invalid": {"auth": "dGVzdDp0ZXN0"}}}
+      {"auths": {"registry-legacy.molecule.invalid": {"auth": "bGVnYWN5OmxlZ2FjeQ=="}}}
     dest: "/etc/containers/auth.json"
     owner: "root"
     group: "root"
     mode: "u=rw,g=,o="
 
 
-- name: "Molecule | Verify | quadlet | Logout: record both registries in the manifest"
+- name: "Molecule | Verify | quadlet | Logout: ensure the per-application authfile directory"
+  ansible.builtin.file:
+    path: "/var/lib/ansible-podman-quadlet/auth/system"
+    state: "directory"
+    owner: "root"
+    group: "root"
+    mode: "u=rwx,g=,o="
+
+
+- name: "Molecule | Verify | quadlet | Logout: craft the per-application authfiles"
+  ansible.builtin.copy:
+    content: "{{ item['content'] }}"
+    dest: "{{ item['dest'] }}"
+    owner: "root"
+    group: "root"
+    mode: "u=rw,g=,o="
+  loop:
+    - dest: "/var/lib/ansible-podman-quadlet/auth/system/webtest.json"
+      content: |
+        {"auths": {"registry.molecule.invalid": {"auth": "d2VidGVzdDp3ZWJ0ZXN0"}}}
+    # the SAME registry with a DIFFERENT credential: must survive unchanged
+    - dest: "/var/lib/ansible-podman-quadlet/auth/system/otherapp.json"
+      content: |
+        {"auths": {"registry.molecule.invalid": {"auth": "b3RoZXI6b3RoZXI="}}}
+  loop_control:
+    label: "{{ item['dest'] }}"
+
+
+- name: "Molecule | Verify | quadlet | Logout: record the registry in the manifest"
   ansible.builtin.copy:
     content: |
       # Managed by Ansible (foundata.podman.quadlet): app=webtest
@@ -770,23 +798,24 @@
         - /var/lib/webtest/app.env
       registries:
         - registry.molecule.invalid
-        - registry-shared.molecule.invalid
       secrets:
         - webtest_secret
+      authfile: /var/lib/ansible-podman-quadlet/auth/system/webtest.json
     dest: "/var/lib/ansible-podman-quadlet/system/webtest.ansible-manifest"
     owner: "root"
     group: "root"
     mode: "u=rw,g=r,o="
 
 
-- name: "Molecule | Verify | quadlet | Logout: plant a second application's manifest claiming the shared registry"
+- name: "Molecule | Verify | quadlet | Logout: plant a second application's manifest claiming the same registry"
   ansible.builtin.copy:
     content: |
       # Managed by Ansible (foundata.podman.quadlet): app=otherapp
       files: []
       registries:
-        - registry-shared.molecule.invalid
+        - registry.molecule.invalid
       secrets: []
+      authfile: /var/lib/ansible-podman-quadlet/auth/system/otherapp.json
     dest: "/var/lib/ansible-podman-quadlet/system/otherapp.ansible-manifest"
     owner: "root"
     group: "root"
@@ -841,14 +870,23 @@
               - "multi-user.target"
 
 
-- name: "Molecule | Verify | quadlet | Logout: read the authfile"
+- name: "Molecule | Verify | quadlet | Logout: read the application's authfile"
   ansible.builtin.slurp:
-    src: "/etc/containers/auth.json"
+    src: "/var/lib/ansible-podman-quadlet/auth/system/webtest.json"
   register: __testing_quadlet_logout_authfile
   failed_when:
     # tolerate podman removing the whole file with its last entry
     - __testing_quadlet_logout_authfile['msg'] is ansible.builtin.defined
     - "'file not found' not in (__testing_quadlet_logout_authfile['msg'] | ansible.builtin.lower)"
+
+
+- name: "Molecule | Verify | quadlet | Logout: read the second application's authfile and the legacy authfile"
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  register: __testing_quadlet_logout_untouched
+  loop:
+    - "/var/lib/ansible-podman-quadlet/auth/system/otherapp.json"
+    - "/etc/containers/auth.json"
 
 
 - name: "Molecule | Verify | quadlet | Logout: read the manifest"
@@ -857,41 +895,154 @@
   register: __testing_quadlet_logout_manifest
 
 
-- name: "Molecule | Verify | quadlet | Logout: check the unclaimed entry was removed, the claimed one kept"
+- name: "Molecule | Verify | quadlet | Logout: check the de-listed entry left only this application's file"
   ansible.builtin.assert:
     that:
-      # the registry no other application declares is logged out (not a
-      # substring of the shared registry's name, so plain matching is safe)
+      # the de-listed registry is gone from the application's own authfile
       - >-
         'registry.molecule.invalid' not in
         (__testing_quadlet_logout_authfile['content'] | ansible.builtin.default('') | ansible.builtin.b64decode)
-      # the registry the second application's manifest still declares survives
+      # the second application keeps its own credential for the same registry
       - >-
-        'registry-shared.molecule.invalid' in
-        (__testing_quadlet_logout_authfile['content'] | ansible.builtin.default('') | ansible.builtin.b64decode)
+        'b3RoZXI6b3RoZXI=' in
+        (__testing_quadlet_logout_untouched['results'][0]['content'] | ansible.builtin.b64decode)
+      # the legacy scope-shared authfile is never touched (migration contract)
+      - >-
+        'bGVnYWN5OmxlZ2FjeQ==' in
+        (__testing_quadlet_logout_untouched['results'][1]['content'] | ansible.builtin.b64decode)
       # the webtest manifest no longer records any registry
       - >-
         ((__testing_quadlet_logout_manifest['content'] | ansible.builtin.b64decode
           | ansible.builtin.from_yaml)['registries'] | ansible.builtin.default([])
          | ansible.builtin.length) == 0
     fail_msg: >-
-      The logout reconciliation did not remove exactly the unclaimed entry: a
-      de-listed login lingering forever, or a registry another application
-      still uses got logged out (breaking its image pulls).
+      The logout reconciliation crossed the application boundary: a de-listed
+      login lingered in the application's own file, another application's
+      credential for the same registry was altered, or the legacy scope-shared
+      authfile was modified.
     success_msg: >-
-      Exactly the unclaimed registry was logged out; the one claimed by the
-      second application survived.
+      The de-listed registry left only this application's authfile; the other
+      application's credential and the legacy authfile stayed untouched.
 
 
-# The planted second-application manifest and the crafted authfile only
-# existed for this test; the webtest application never logged in anywhere.
+# The planted manifests and crafted authfiles only existed for this test;
+# the webtest application never logged in anywhere.
 - name: "Molecule | Verify | quadlet | Logout: remove the crafted test files"
   ansible.builtin.file:
     path: "{{ item }}"
     state: "absent"
   loop:
     - "/var/lib/ansible-podman-quadlet/system/otherapp.ansible-manifest"
+    - "/var/lib/ansible-podman-quadlet/auth/system/webtest.json"
+    - "/var/lib/ansible-podman-quadlet/auth/system/otherapp.json"
     - "/etc/containers/auth.json"
+
+
+## Authentication file injection (init-only)
+#
+# The injected environment/label decide which credentials podman uses at
+# service start and during automatic image updates; validated on the computed
+# unit list, so no reachable registry is needed.
+
+- name: "Molecule | Verify | quadlet | Injection: include the role's init with registry credentials"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+    tasks_from: "init"
+    public: true
+  vars:
+    quadlet_podman_app: "authtest"
+    quadlet_podman_registry_auth:
+      - registry: "registry.molecule.invalid"
+        username: "authtest"
+        password: "molecule-irrelevant"
+    quadlet_podman_units:
+      - name: "authtest-auto"
+        type: "container"
+        sections:
+          Container:
+            Image: "quay.io/libpod/testimage:20241011"
+            AutoUpdate: "registry"
+          Install:
+            WantedBy:
+              - "multi-user.target"
+      - name: "authtest-plain"
+        type: "container"
+        sections:
+          Container:
+            Image: "quay.io/libpod/testimage:20241011"
+
+
+- name: "Molecule | Verify | quadlet | Injection: assert the environment and label injection"
+  ansible.builtin.assert:
+    that:
+      # every unit gets the authentication file environment for its service
+      - "('REGISTRY_AUTH_FILE=' ~ __testing_quadlet_auth_path) in (__testing_quadlet_auth_auto['Service']['Environment'] | ansible.builtin.default([]))"
+      - "('REGISTRY_AUTH_FILE=' ~ __testing_quadlet_auth_path) in (__testing_quadlet_auth_plain['Service']['Environment'] | ansible.builtin.default([]))"
+      # only AutoUpdate=registry containers get the auto-update label
+      - >-
+        ('io.containers.autoupdate.authfile=' ~ __testing_quadlet_auth_path)
+        in (__testing_quadlet_auth_auto['Container']['Label'] | ansible.builtin.default([]))
+      - >-
+        (__testing_quadlet_auth_plain['Container']['Label'] | ansible.builtin.default([])
+         | ansible.builtin.select('ansible.builtin.match', 'io\.containers\.autoupdate\.authfile=')
+         | ansible.builtin.length) == 0
+    fail_msg: >-
+      The per-application authentication file was not injected as expected
+      (units: {{ __quadlet_podman_units_effective }}).
+    success_msg: >-
+      Every unit received REGISTRY_AUTH_FILE and exactly the auto-updating
+      container received the auto-update authfile label.
+  vars:
+    __testing_quadlet_auth_path: "/var/lib/ansible-podman-quadlet/auth/system/authtest.json"
+    __testing_quadlet_auth_auto: >-
+      {{ (__quadlet_podman_units_effective
+         | ansible.builtin.selectattr('name', 'ansible.builtin.equalto', 'authtest-auto')
+         | ansible.builtin.first)['sections'] }}
+    __testing_quadlet_auth_plain: >-
+      {{ (__quadlet_podman_units_effective
+         | ansible.builtin.selectattr('name', 'ansible.builtin.equalto', 'authtest-plain')
+         | ansible.builtin.first)['sections'] }}
+
+
+- name: "Molecule | Verify | quadlet | Injection: run init with a user-supplied REGISTRY_AUTH_FILE (must fail)"
+  block:
+
+    - name: "Molecule | Verify | quadlet | Injection: include the role's init with a conflicting environment entry"
+      ansible.builtin.include_role:
+        name: "foundata.podman.quadlet"
+        tasks_from: "init"
+      vars:
+        quadlet_podman_app: "authtest"
+        quadlet_podman_registry_auth:
+          - registry: "registry.molecule.invalid"
+            username: "authtest"
+            password: "molecule-irrelevant"
+        quadlet_podman_units:
+          - name: "authtest-conflict"
+            type: "container"
+            sections:
+              Container:
+                Image: "quay.io/libpod/testimage:20241011"
+              Service:
+                Environment:
+                  - "REGISTRY_AUTH_FILE=/tmp/own-authfile.json"
+
+    - name: "Molecule | Verify | quadlet | Injection: fail because the conflicting entry was accepted"
+      ansible.builtin.fail:
+        msg: "A user-supplied REGISTRY_AUTH_FILE was accepted although quadlet_podman_registry_auth is set."
+
+  rescue:
+
+    - name: "Molecule | Verify | quadlet | Injection: assert init failed in the authfile conflict check"
+      ansible.builtin.assert:
+        that:
+          - >-
+            (ansible_failed_task['name'] | ansible.builtin.default(''))
+            is ansible.builtin.search('authentication file')
+        fail_msg: >-
+          The run failed, but not in the authfile conflict check as expected
+          (failed task: '{{ ansible_failed_task['name'] | ansible.builtin.default('unknown') }}').
+        success_msg: "The conflicting REGISTRY_AUTH_FILE entry was rejected by the role's init."
 
 
 ## Complete removal via the manifest (runs last on purpose)

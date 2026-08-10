@@ -455,15 +455,28 @@ quadlet_podman_secrets: []
 # registries; the credentials are also used by the automatic image updates
 # (`AutoUpdate=registry`).
 #
-# The role records its logins in a per-application manifest (root-owned, below
-# `/var/lib/ansible-podman-quadlet/`): registries removed from this list are
-# logged out again on the next run, and `quadlet_podman_state: "absent"` logs
-# out of all recorded registries, so no credentials linger after removal. Note
-# that the authentication file is shared per scope (one per rootless account,
-# `/etc/containers/auth.json` for rootful). The role therefore only logs out of
-# a registry when no other application's manifest in the same scope still
-# declares it: shared credentials stay in place until the last application using
-# them is removed or stops declaring the registry.
+# The credentials belong exclusively to this application: they are written to a
+# per-application authentication file (rootful below
+# `/var/lib/ansible-podman-quadlet/auth/`, rootless below the account's
+# `~/.config/containers/ansible-auth/`), so applications may use different
+# credentials for the same registry and converging or removing one application
+# never changes another one's logins. Registries removed from this list are
+# logged out of that file on the next run; `quadlet_podman_state: "absent"`
+# deletes the file.
+#
+# The role injects `REGISTRY_AUTH_FILE` into every generated service so startup
+# pulls use these credentials (also after a reboot), and `AutoUpdate=registry`
+# containers additionally get the `io.containers.autoupdate.authfile` label,
+# which podman-auto-update needs because it inspects the running container
+# independently of the service. Setting either of the two yourself while this
+# list is non-empty is rejected. For `kube` units the role cannot place that
+# label on the generated containers; add it in the Kubernetes YAML when
+# auto-updating private images, or the update falls back to the scope defaults.
+#
+# Migration note: role versions before this contract logged into the
+# scope-shared `auth.json`; those entries are deliberately left untouched and
+# can be cleaned up manually once every application has converged with a role
+# version using per-application files.
 #
 # Example (reference a vaulted variable instead of a literal value in real
 # deployments):

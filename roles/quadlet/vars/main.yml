@@ -329,16 +329,25 @@ __quadlet_podman_systemd_units_restart: >-
   }}
 
 
-# Authentication file for registry logins. The podman default for the
-# respective scope lives below the runtime directory (XDG_RUNTIME_DIR) and
-# would be lost on reboot; a persistent path keeps pulls by the generated
-# services and by podman-auto-update working.
-__quadlet_podman_authfile_path: >-
+# Per-APPLICATION authentication file for registry logins. One file per
+# application keeps credentials isolated: applications may use different
+# credentials for the same registry, and converging or removing one
+# application never touches another one's logins (the former scope-shared
+# auth.json made the last converged application win). The podman default
+# path lives below the runtime directory and would be lost on reboot; a
+# persistent path keeps pulls by the generated services and by
+# podman-auto-update working. Rootless files live in the user's home (the
+# user services have to read them), NOT below the root-only manifest
+# directory. Legacy scope-shared auth.json files are deliberately left
+# untouched (migration: logins move here on the next converge; clean the
+# shared file manually once every application is migrated).
+__quadlet_podman_authfile_dir_path: >-
   {{
-    (__quadlet_podman_user_home ~ '/.config/containers/auth.json')
+    (__quadlet_podman_user_home ~ '/.config/containers/ansible-auth')
     if (__quadlet_podman_rootless | ansible.builtin.bool)
-    else '/etc/containers/auth.json'
+    else '/var/lib/ansible-podman-quadlet/auth/system'
   }}
+__quadlet_podman_authfile_path: "{{ __quadlet_podman_authfile_dir_path }}/{{ quadlet_podman_app }}.json"
 
 
 # Scope abstraction for tasks and handlers that talk to Podman or systemd:
