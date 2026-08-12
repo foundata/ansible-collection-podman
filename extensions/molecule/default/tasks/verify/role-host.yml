@@ -646,6 +646,9 @@
 - name: "Molecule | Verify | host | Rootless absent: create a dedicated test account"
   ansible.builtin.user:
     name: "timeruser"
+    # fixed UID: the next fixture account must not reuse this UID moments
+    # after its teardown (logind races the new user manager start otherwise)
+    uid: 2801
     create_home: true
 
 - name: "Molecule | Verify | host | Rootless absent: enable the account for rootless Podman"
@@ -714,6 +717,7 @@
 - name: "Molecule | Verify | host | Account gone: create a dedicated test account"
   ansible.builtin.user:
     name: "goneuser"
+    uid: 2802
     create_home: true
 
 

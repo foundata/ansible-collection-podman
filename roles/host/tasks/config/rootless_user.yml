@@ -391,9 +391,25 @@
         - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
 
 
-    - name: "Config | Rootless | Wait for the user runtime directory of '{{ __host_podman_ru['name'] }}'"
+    # loginctl enable-linger only queues the user manager start; when the
+    # same UID was torn down moments before (an account was replaced), that
+    # start can get lost in the still-running deactivation. The explicit
+    # start is idempotent and waits for the old instance to finish stopping.
+    - name: "Config | Rootless | Ensure the running user manager of '{{ __host_podman_ru['name'] }}'"
+      ansible.builtin.systemd_service:
+        name: "user@{{ __host_podman_ru_uid }}.service"
+        state: "started"
+      when:
+        - __host_podman_ru['linger'] | ansible.builtin.bool
+        - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+
+
+    # The bus socket appears AFTER the runtime directory: waiting only for
+    # the directory raced "systemctl --user" against the starting user
+    # manager ("Failed to connect to user scope bus").
+    - name: "Config | Rootless | Wait for the user manager bus of '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.wait_for:
-        path: "/run/user/{{ __host_podman_ru_uid }}"
+        path: "/run/user/{{ __host_podman_ru_uid }}/bus"
         timeout: 30
       when:
         - __host_podman_ru['linger'] | ansible.builtin.bool
