@@ -2,6 +2,20 @@
 
 This repository contains the `foundata.podman` Ansible Collection.
 
+It provides resources to manage and use [Podman](https://podman.io/), a daemonless container engine, and to deploy OCI container workloads as systemd services via [Quadlet](https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html) units.
+
+
+<div align="center" id="project-readme-header">
+<br>
+<br>
+
+**⭐ Found this useful? Support open-source and star this project:**
+
+[![GitHub repository](https://img.shields.io/github/stars/foundata/ansible-collection-podman.svg)](https://github.com/foundata/ansible-collection-podman)
+
+<br>
+</div>
+
 
 
 ## Table of contents<a id="toc"></a>
