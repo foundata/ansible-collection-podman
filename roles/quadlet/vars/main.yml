@@ -166,9 +166,10 @@ __quadlet_podman_file_marker: "# Managed by Ansible (foundata.podman.quadlet): a
 # deliberately OUTSIDE the rootless user's writable tree: the recorded file
 # paths get removed with root privileges later, so a manifest the service
 # account could edit would let it delete arbitrary files as root.
+__quadlet_podman_manifest_base_dir_path: "/var/lib/ansible-podman-quadlet"
 __quadlet_podman_manifest_dir_path: >-
   {{
-    '/var/lib/ansible-podman-quadlet/'
+    __quadlet_podman_manifest_base_dir_path ~ '/'
     ~ (('user-' ~ quadlet_podman_user)
        if (__quadlet_podman_rootless | ansible.builtin.bool)
        else 'system')
@@ -194,6 +195,51 @@ __quadlet_podman_file_dests_declared: >-
   {%-   endif -%}
   {%- endfor -%}
   {{ __dests }}
+# ALL requested resources of the application, regardless of entry state:
+# "requested" means the role will potentially mutate the resource (create,
+# change or delete it). The conflict checks intersect THESE with the other
+# applications' manifests, so "state: absent" cannot bypass ownership and
+# delete another application's resource; the manifest keeps recording only
+# the present entries (an application that removes its own resource must
+# also lose the ownership claim).
+__quadlet_podman_secret_names_requested: >-
+  {{
+    quadlet_podman_secrets
+    | ansible.builtin.map(attribute='name')
+    | ansible.builtin.list
+  }}
+__quadlet_podman_file_dests_requested: >-
+  {{
+    quadlet_podman_files
+    | ansible.builtin.map(attribute='dest')
+    | ansible.builtin.list
+  }}
+
+
+# Directories: the declared (present) paths are recorded in the manifest as
+# reference claims - several applications MAY declare the same directory,
+# but removing a directory another application still references (or that
+# holds another application's managed file) is rejected. Role uninstall
+# keeps directories (persistent data), so the claim is a reference, not a
+# removal promise.
+__quadlet_podman_dir_paths_declared: >-
+  {%- set __paths = [] -%}
+  {%- for __entry in quadlet_podman_directories -%}
+  {%-   if (__entry['state'] | ansible.builtin.default('present')) == 'present' -%}
+  {%-     set _ = __paths.append(__entry['path']) -%}
+  {%-   endif -%}
+  {%- endfor -%}
+  {{ __paths }}
+__quadlet_podman_dir_paths_absent: >-
+  {%- set __paths = [] -%}
+  {%- for __entry in quadlet_podman_directories -%}
+  {%-   if (__entry['state'] | ansible.builtin.default('present')) == 'absent' -%}
+  {%-     set _ = __paths.append(__entry['path']) -%}
+  {%-   endif -%}
+  {%- endfor -%}
+  {{ __paths }}
+
+
 __quadlet_podman_registries_declared: >-
   {{
     quadlet_podman_registry_auth

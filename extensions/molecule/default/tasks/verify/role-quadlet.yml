@@ -742,6 +742,281 @@
     success_msg: "De-listed run-once and timer units were removed and stopped."
 
 
+## Ownership versus absent declarations
+#
+# Regression: the conflict check intersected only PRESENT entries with the
+# other manifests, so a second application could delete a foreign file or
+# secret simply by declaring it "state: absent". The contract now: an absent
+# declaration is an authoritative removal request for UNOWNED resources but
+# never overrides another application's ownership; an application can always
+# remove what its own manifest records. File and directory paths are
+# host-global, so their claims are checked across ALL scopes.
+
+- name: "Molecule | Verify | quadlet | Absent ownership: read the owned file and secret (before)"
+  ansible.builtin.command:
+    argv: "{{ item }}"
+  register: __testing_quadlet_absown_before
+  changed_when:
+    - false
+  loop:
+    - ["cat", "/var/lib/webtest/app.env"]
+    - ["podman", "secret", "inspect", "webtest_secret"]
+
+
+- name: "Molecule | Verify | quadlet | Absent ownership: request the foreign file and secret absent (must fail)"
+  block:
+
+    - name: "Molecule | Verify | quadlet | Absent ownership: include the role with foreign absent declarations"
+      ansible.builtin.include_role:
+        name: "foundata.podman.quadlet"
+      vars:
+        quadlet_podman_app: "absenttest"
+        quadlet_podman_service_state: "unmanaged"
+        quadlet_podman_files:
+          - dest: "/var/lib/webtest/app.env"
+            state: "absent"
+        quadlet_podman_secrets:
+          - name: "webtest_secret"
+            state: "absent"
+
+    - name: "Molecule | Verify | quadlet | Absent ownership: fail because the foreign removal was accepted"
+      ansible.builtin.fail:
+        msg: "state absent removed a file and a secret owned by another application."
+
+  rescue:
+
+    - name: "Molecule | Verify | quadlet | Absent ownership: assert the run failed in the ownership check"
+      ansible.builtin.assert:
+        that:
+          - >-
+            'conflict with resources owned by another application' in
+            (ansible_failed_result['msg'] | ansible.builtin.default(''))
+        fail_msg: >-
+          The run failed, but not in the ownership check:
+          {{ ansible_failed_result['msg'] | ansible.builtin.default('(no message)') }}
+        success_msg: "Foreign absent declarations are rejected by the ownership check."
+
+
+- name: "Molecule | Verify | quadlet | Absent ownership: read the owned file and secret (after)"
+  ansible.builtin.command:
+    argv: "{{ item }}"
+  register: __testing_quadlet_absown_after
+  changed_when:
+    - false
+  loop:
+    - ["cat", "/var/lib/webtest/app.env"]
+    - ["podman", "secret", "inspect", "webtest_secret"]
+
+
+- name: "Molecule | Verify | quadlet | Absent ownership: get information about the rejected application's manifest"
+  ansible.builtin.stat:
+    path: "/var/lib/ansible-podman-quadlet/system/absenttest.ansible-manifest"
+  register: __testing_quadlet_absown_manifest
+
+
+- name: "Molecule | Verify | quadlet | Absent ownership: assert nothing was touched"
+  ansible.builtin.assert:
+    that:
+      - __testing_quadlet_absown_after['results'][0]['stdout'] == __testing_quadlet_absown_before['results'][0]['stdout']
+      - __testing_quadlet_absown_after['results'][1]['rc'] == 0
+      - not (__testing_quadlet_absown_manifest['stat']['exists'] | ansible.builtin.bool)
+    fail_msg: >-
+      The rejected absent declarations still changed the owned resources or
+      left a manifest behind.
+    success_msg: "The owned file and secret survived unchanged; no manifest was written for the rejected run."
+
+
+# The same rejection must hold in check mode, without mutating anything.
+- name: "Molecule | Verify | quadlet | Absent ownership: repeat the foreign request in check mode (must fail)"
+  block:
+
+    - name: "Molecule | Verify | quadlet | Absent ownership: include the role in check mode"
+      ansible.builtin.include_role:
+        name: "foundata.podman.quadlet"
+        apply:
+          check_mode: true
+      vars:
+        quadlet_podman_app: "absenttest"
+        quadlet_podman_service_state: "unmanaged"
+        quadlet_podman_files:
+          - dest: "/var/lib/webtest/app.env"
+            state: "absent"
+
+    - name: "Molecule | Verify | quadlet | Absent ownership: fail because check mode accepted the foreign removal"
+      ansible.builtin.fail:
+        msg: "Check mode did not report the ownership rejection."
+
+  rescue:
+
+    - name: "Molecule | Verify | quadlet | Absent ownership: assert the check mode run failed in the ownership check"
+      ansible.builtin.assert:
+        that:
+          - >-
+            'conflict with resources owned by another application' in
+            (ansible_failed_result['msg'] | ansible.builtin.default(''))
+        fail_msg: >-
+          The check mode run failed, but not in the ownership check:
+          {{ ansible_failed_result['msg'] | ansible.builtin.default('(no message)') }}
+        success_msg: "Check mode reports the ownership rejection."
+
+
+# Cross-scope: file paths are host-global, so a rootless application must
+# not be able to remove a rootful application's file either.
+- name: "Molecule | Verify | quadlet | Absent ownership: request the rootful file absent from a rootless application (must fail)"
+  block:
+
+    - name: "Molecule | Verify | quadlet | Absent ownership: include the role rootless with the foreign file"
+      ansible.builtin.include_role:
+        name: "foundata.podman.quadlet"
+      vars:
+        quadlet_podman_app: "crossabsent"
+        quadlet_podman_user: "containerapp"
+        quadlet_podman_service_state: "unmanaged"
+        quadlet_podman_files:
+          - dest: "/var/lib/webtest/app.env"
+            state: "absent"
+
+    - name: "Molecule | Verify | quadlet | Absent ownership: fail because the cross-scope removal was accepted"
+      ansible.builtin.fail:
+        msg: "A rootless application removed a rootful application's file."
+
+  rescue:
+
+    - name: "Molecule | Verify | quadlet | Absent ownership: assert the cross-scope rejection"
+      ansible.builtin.assert:
+        that:
+          - >-
+            'conflict with resources owned by another application' in
+            (ansible_failed_result['msg'] | ansible.builtin.default(''))
+        fail_msg: >-
+          The run failed, but not in the ownership check:
+          {{ ansible_failed_result['msg'] | ansible.builtin.default('(no message)') }}
+        success_msg: "File claims hold across scopes; the rootless removal was rejected."
+
+
+# Directory removal takes the tree with it, so it must respect both the
+# directory reference claims and the file claims below the path.
+- name: "Molecule | Verify | quadlet | Absent ownership: request the foreign directory absent (must fail)"
+  block:
+
+    - name: "Molecule | Verify | quadlet | Absent ownership: include the role with the foreign directory absent"
+      ansible.builtin.include_role:
+        name: "foundata.podman.quadlet"
+      vars:
+        quadlet_podman_app: "absenttest"
+        quadlet_podman_service_state: "unmanaged"
+        quadlet_podman_directories:
+          - path: "/var/lib/webtest"
+            state: "absent"
+
+    - name: "Molecule | Verify | quadlet | Absent ownership: fail because the foreign directory removal was accepted"
+      ansible.builtin.fail:
+        msg: "state absent recursively removed a directory another application references."
+
+  rescue:
+
+    - name: "Molecule | Verify | quadlet | Absent ownership: assert the directory rejection"
+      ansible.builtin.assert:
+        that:
+          - >-
+            'conflict with resources owned by another application' in
+            (ansible_failed_result['msg'] | ansible.builtin.default(''))
+        fail_msg: >-
+          The run failed, but not in the ownership check:
+          {{ ansible_failed_result['msg'] | ansible.builtin.default('(no message)') }}
+        success_msg: "Removing a directory another application references is rejected."
+
+
+- name: "Molecule | Verify | quadlet | Absent ownership: assert the foreign directory survived"
+  ansible.builtin.stat:
+    path: "/var/lib/webtest/app.env"
+  register: __testing_quadlet_absown_dirfile
+  failed_when:
+    - not (__testing_quadlet_absown_dirfile['stat']['exists'] | ansible.builtin.bool)
+
+
+# An application may always remove its OWN resources, and absence is
+# authoritative for unclaimed pre-existing resources.
+- name: "Molecule | Verify | quadlet | Absent ownership: plant an unclaimed pre-existing file"
+  ansible.builtin.copy:
+    dest: "/var/tmp/molecule-unclaimed.env"
+    content: "UNCLAIMED=1\n"
+    owner: "root"
+    group: "root"
+    mode: "u=rw,g=r,o=r"
+
+
+- name: "Molecule | Verify | quadlet | Absent ownership: deploy own resources"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "absenttest"
+    quadlet_podman_service_state: "unmanaged"
+    quadlet_podman_files:
+      - dest: "/var/tmp/molecule-absenttest.env"
+        content: "OWNED=1\n"
+    quadlet_podman_secrets:
+      - name: "absenttest_secret"
+        value: "molecule-absenttest"
+
+
+- name: "Molecule | Verify | quadlet | Absent ownership: remove the own resources and the unclaimed file"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "absenttest"
+    quadlet_podman_service_state: "unmanaged"
+    quadlet_podman_files:
+      - dest: "/var/tmp/molecule-absenttest.env"
+        state: "absent"
+      - dest: "/var/tmp/molecule-unclaimed.env"
+        state: "absent"
+    quadlet_podman_secrets:
+      - name: "absenttest_secret"
+        state: "absent"
+
+
+- name: "Molecule | Verify | quadlet | Absent ownership: get information about the removed resources"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: __testing_quadlet_absown_removed
+  loop:
+    - "/var/tmp/molecule-absenttest.env"
+    - "/var/tmp/molecule-unclaimed.env"
+
+
+- name: "Molecule | Verify | quadlet | Absent ownership: query the removed secret"
+  ansible.builtin.command:
+    argv: ["podman", "secret", "inspect", "absenttest_secret"]
+  register: __testing_quadlet_absown_secret
+  changed_when:
+    - false
+  failed_when:
+    - __testing_quadlet_absown_secret['rc'] == 0
+
+
+- name: "Molecule | Verify | quadlet | Absent ownership: assert own and unclaimed removals worked"
+  ansible.builtin.assert:
+    that:
+      - not (__testing_quadlet_absown_removed['results'][0]['stat']['exists'] | ansible.builtin.bool)
+      - not (__testing_quadlet_absown_removed['results'][1]['stat']['exists'] | ansible.builtin.bool)
+    fail_msg: >-
+      Removing the application's own or an unclaimed resource failed
+      ({{ __testing_quadlet_absown_removed['results']
+          | ansible.builtin.map(attribute='stat.exists') | ansible.builtin.list }}).
+    success_msg: >-
+      An application removes its own resources, and absence is authoritative
+      for unclaimed pre-existing files.
+
+
+- name: "Molecule | Verify | quadlet | Absent ownership: remove the test application again"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "absenttest"
+    quadlet_podman_state: "absent"
+
+
 ## Collision with an administrator-owned native unit
 #
 # Regression: a hand-written /etc/systemd/system/<name>.service shadows the

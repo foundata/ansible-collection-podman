@@ -38,16 +38,20 @@
 # The manifests of the other applications in this scope feed the
 # exclusive-ownership checks below (BEFORE anything is changed), the
 # stale-resource protection and the registry logout further down.
-- name: "Config | Default | Find the manifests of the other applications in this scope"
+# All scopes are searched: secrets, units and services are namespaced per
+# Podman scope, but file and directory paths are host-global, so a rootful
+# and a rootless application can still collide on them.
+- name: "Config | Default | Find the manifests of the other applications (all scopes)"
   ansible.builtin.find:
-    paths: "{{ __quadlet_podman_manifest_dir_path }}"
+    paths: "{{ __quadlet_podman_manifest_base_dir_path }}"
     patterns:
       - "*.ansible-manifest"
     file_type: "file"
+    recurse: true
   register: __quadlet_podman_manifest_find
 
 
-- name: "Config | Default | Read the manifests of the other applications in this scope"
+- name: "Config | Default | Read the manifests of the other applications"
   ansible.builtin.slurp:
     src: "{{ item }}"
   register: __quadlet_podman_other_manifests_slurp
@@ -67,43 +71,77 @@
 # or managed file would rewrite and delete each other's resources. Reject the
 # conflict before anything is changed (a shared credential can be declared
 # per application under different secret names with the same value).
+# Secrets, units and services only conflict within the same Podman scope;
+# files and directories are host-global and collected across ALL scopes.
 - name: "Config | Default | Determine the resources claimed by the other applications"
   ansible.builtin.set_fact:
     __quadlet_podman_other_claims_now: >-
-      {%- set __ns = namespace(secrets=[], files=[], units=[], services=[]) -%}
+      {%- set __ns = namespace(secrets=[], files=[], dirs=[], units=[], services=[]) -%}
       {%- for __result in (__quadlet_podman_other_manifests_slurp['results'] | ansible.builtin.default([])) -%}
       {%-   set __manifest = ((__result['content'] | ansible.builtin.default('') | ansible.builtin.b64decode
                                | ansible.builtin.from_yaml) | ansible.builtin.default({}, true)) -%}
-      {%-   set __ns.secrets = __ns.secrets + (__manifest['secrets'] | ansible.builtin.default([])) -%}
+      {%-   set __same_scope = (__result['item'] | ansible.builtin.dirname) == __quadlet_podman_manifest_dir_path -%}
+      {%-   if __same_scope -%}
+      {%-     set __ns.secrets = __ns.secrets + (__manifest['secrets'] | ansible.builtin.default([])) -%}
+      {%-     set __ns.units = __ns.units + (__manifest['units'] | ansible.builtin.default([])) -%}
+      {%-     set __ns.services = __ns.services + (__manifest['services'] | ansible.builtin.default([])) -%}
+      {%-   endif -%}
       {%-   set __ns.files = __ns.files + (__manifest['files'] | ansible.builtin.default([])) -%}
-      {%-   set __ns.units = __ns.units + (__manifest['units'] | ansible.builtin.default([])) -%}
-      {%-   set __ns.services = __ns.services + (__manifest['services'] | ansible.builtin.default([])) -%}
+      {%-   set __ns.dirs = __ns.dirs + (__manifest['directories'] | ansible.builtin.default([])) -%}
       {%- endfor -%}
-      {{ {'secrets': __ns.secrets, 'files': __ns.files, 'units': __ns.units, 'services': __ns.services} }}
+      {{ {'secrets': __ns.secrets, 'files': __ns.files, 'dirs': __ns.dirs,
+          'units': __ns.units, 'services': __ns.services} }}
 
 
-- name: "Config | Default | Check the declared secrets and files are not claimed by another application"
+# The REQUESTED lists (every entry, absent included) feed the intersections:
+# "state: absent" is an authoritative removal request but never overrides
+# another application's ownership - otherwise it would silently delete
+# resources the other manifest still records as existing. An application can
+# always remove what its OWN manifest records (own manifest excluded above).
+# A directory may be declared by several applications (shared bind-mount
+# trees), but removing one that another application still references - or
+# that holds another application's managed file - is refused: the recursive
+# deletion would take the foreign content with it.
+- name: "Config | Default | Check the requested resources are not owned by another application"
   ansible.builtin.assert:
     that:
       - (__quadlet_podman_secret_conflicts | ansible.builtin.length) == 0
       - (__quadlet_podman_file_conflicts | ansible.builtin.length) == 0
       - (__quadlet_podman_unit_conflicts | ansible.builtin.length) == 0
       - (__quadlet_podman_service_conflicts | ansible.builtin.length) == 0
+      - (__quadlet_podman_dir_conflicts | ansible.builtin.length) == 0
     fail_msg: >-
-      Another application's manifest in this scope already records these
-      resources: secrets
+      Refusing to manage application {{ quadlet_podman_app }}: the requested
+      resources conflict with resources owned by another application: secrets
       [{{ __quadlet_podman_secret_conflicts | ansible.builtin.join(', ') }}],
       files [{{ __quadlet_podman_file_conflicts | ansible.builtin.join(', ') }}],
       unit files [{{ __quadlet_podman_unit_conflicts | ansible.builtin.join(', ') }}],
-      services [{{ __quadlet_podman_service_conflicts | ansible.builtin.join(', ') }}].
-      Unit file names and generated service names share one scope-wide
-      systemd namespace; each resource belongs to exactly one application.
+      services [{{ __quadlet_podman_service_conflicts | ansible.builtin.join(', ') }}],
+      directory removals [{{ __quadlet_podman_dir_conflicts | ansible.builtin.join(', ') }}].
+      Remove the resource from the owning application first or transfer
+      ownership explicitly; each resource belongs to exactly one application
+      (file and directory paths across ALL scopes, the rest per scope).
     quiet: true
   vars:
     __quadlet_podman_secret_conflicts: >-
-      {{ __quadlet_podman_secret_names_declared | ansible.builtin.intersect(__quadlet_podman_other_claims_now['secrets']) }}
+      {{ __quadlet_podman_secret_names_requested | ansible.builtin.intersect(__quadlet_podman_other_claims_now['secrets']) }}
     __quadlet_podman_file_conflicts: >-
-      {{ __quadlet_podman_file_dests_declared | ansible.builtin.intersect(__quadlet_podman_other_claims_now['files']) }}
+      {{ __quadlet_podman_file_dests_requested | ansible.builtin.intersect(__quadlet_podman_other_claims_now['files']) }}
+    __quadlet_podman_dir_conflicts: >-
+      {%- set __ns = namespace(rows=[]) -%}
+      {%- for __dir in __quadlet_podman_dir_paths_absent -%}
+      {%-   for __claim in __quadlet_podman_other_claims_now['dirs'] -%}
+      {%-     if (__claim == __dir) or __claim.startswith(__dir ~ '/') -%}
+      {%-       set _ = __ns.rows.append(__dir ~ ' (directory referenced by another application: ' ~ __claim ~ ')') -%}
+      {%-     endif -%}
+      {%-   endfor -%}
+      {%-   for __file in __quadlet_podman_other_claims_now['files'] -%}
+      {%-     if __file.startswith(__dir ~ '/') -%}
+      {%-       set _ = __ns.rows.append(__dir ~ ' (holds the managed file ' ~ __file ~ ')') -%}
+      {%-     endif -%}
+      {%-   endfor -%}
+      {%- endfor -%}
+      {{ __ns.rows | ansible.builtin.unique }}
     __quadlet_podman_unit_conflicts: >-
       {{
         ((__quadlet_podman_units_effective | ansible.builtin.map(attribute='filename') | ansible.builtin.list)
@@ -928,6 +966,11 @@
   vars:
     __quadlet_podman_manifest_data:
       files: "{{ __quadlet_podman_file_dests_declared | ansible.builtin.sort }}"
+      # reference claims only: several applications may declare a directory,
+      # and neither application uninstall nor role uninstall removes them
+      # (persistent data) - but a foreign "state: absent" is rejected while
+      # this claim exists
+      directories: "{{ __quadlet_podman_dir_paths_declared | ansible.builtin.sort }}"
       registries: "{{ __quadlet_podman_registries_declared | ansible.builtin.sort }}"
       secrets: "{{ __quadlet_podman_secret_names_declared | ansible.builtin.sort }}"
       # recorded so a later "state: absent" can remove the unit files even

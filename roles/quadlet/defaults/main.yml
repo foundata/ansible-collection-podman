@@ -404,10 +404,13 @@ quadlet_podman_unit_defaults: {}
 # change the declared value and converge. Declaring a pre-existing secret adopts
 # it: its value is reconciled to the declared one and de-listing it later
 # removes it. A secret name belongs to exactly one application per scope;
-# conflicting claims by another application's manifest are rejected. Podman
-# copies secret data into containers at creation time, so a changed value also
-# restarts the application services (their containers are recreated on start,
-# which re-materializes the secret).
+# conflicting claims by another application's manifest are rejected, whether the
+# entry's `state` is `present` or `absent` (an absent declaration is an
+# authoritative removal request but never overrides another application's
+# ownership; only unowned secrets can be removed this way). Podman copies secret
+# data into containers at creation time, so a changed value also restarts the
+# application services (their containers are recreated on start, which
+# re-materializes the secret).
 #
 # Reference the secrets from Quadlet units via the `Secret` setting of the
 # `Container` section, e.g.
@@ -528,6 +531,13 @@ quadlet_podman_registry_auth: []
 # contain persistent application data); set an item's `state` to `absent` to
 # remove it explicitly.
 #
+# Declared directories are recorded in the application's manifest as reference
+# claims. Several applications MAY declare the same directory (shared bind-mount
+# trees are fine), but an explicit `state: "absent"` is rejected while another
+# application (in ANY scope - directory paths are host-global) still declares
+# the directory or a descendant of it, or owns a managed file below it: the
+# recursive removal would take the foreign content with it.
+#
 # Example:
 #
 # ```yaml
@@ -573,9 +583,11 @@ quadlet_podman_directories: []
 # Declared files are owned by the application: content and attributes are
 # enforced, a pre-existing file is adopted, and de-listing (or
 # `quadlet_podman_state: "absent"`) removes it. A managed file belongs to
-# exactly one application per scope; conflicting claims by another application's
-# manifest are rejected. Parent directories must exist (see
-# `quadlet_podman_directories`).
+# exactly one application - file paths are host-global, so the claim is checked
+# against the manifests of ALL scopes (rootful and every rootless account), and
+# it covers absent entries too: `state: "absent"` is an authoritative removal
+# request for an unowned file but never overrides another application's
+# ownership. Parent directories must exist (see `quadlet_podman_directories`).
 #
 # Do not put secrets into environment or configuration files if it can be
 # avoided; prefer `quadlet_podman_secrets`.
