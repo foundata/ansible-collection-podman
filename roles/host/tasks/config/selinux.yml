@@ -131,12 +131,14 @@
 # covers all sub-paths and label types in one rule.
 - name: "Config | SELinux | Set file context equivalence for storage path"
   community.general.sefcontext:
-    target: "{{ item }}"
+    target: "{{ __host_podman_selinux_path_item }}"
     substitute: "/var/lib/containers"
     state: "present"
     reload: true
   register: __host_podman_sefcontext_result
   loop: "{{ __host_podman_selinux_declared_paths }}"
+  loop_control:
+    loop_var: "__host_podman_selinux_path_item"
 
 
 # Only after the rule (dis)appeared: newly created files inherit the
@@ -151,34 +153,38 @@
       - "-F" # reset the full context, including the user part
       - "-r"
       - "-v"
-      - "{{ item['item'] }}"
+      - "{{ __host_podman_sefcontext_item['__host_podman_selinux_path_item'] }}"
   register: __host_podman_restorecon_result
   changed_when:
     - (__host_podman_restorecon_result['stdout'] | ansible.builtin.length) > 0
   when:
-    - item is ansible.builtin.changed
+    - __host_podman_sefcontext_item is ansible.builtin.changed
   loop: "{{ __host_podman_sefcontext_result['results'] | ansible.builtin.default([]) }}"
   loop_control:
-    label: "{{ item['item'] }}"
+    loop_var: "__host_podman_sefcontext_item"
+    label: "{{ __host_podman_sefcontext_item['__host_podman_selinux_path_item'] }}"
 
 
 - name: "Config | SELinux | Remove file context equivalences for paths no longer declared"
   community.general.sefcontext:
-    target: "{{ item }}"
+    target: "{{ __host_podman_stale_path_item }}"
     substitute: "/var/lib/containers"
     state: "absent"
     reload: true
   register: __host_podman_sefcontext_removal_result
   loop: "{{ __host_podman_selinux_stale_paths }}"
+  loop_control:
+    loop_var: "__host_podman_stale_path_item"
 
 
 - name: "Config | SELinux | Check which de-listed paths still exist"
   ansible.builtin.stat:
-    path: "{{ item }}"
+    path: "{{ __host_podman_stale_stat_item }}"
   register: __host_podman_selinux_stale_stat
   loop: "{{ __host_podman_selinux_stale_paths }}"
   loop_control:
-    label: "{{ item }}"
+    loop_var: "__host_podman_stale_stat_item"
+    label: "{{ __host_podman_stale_stat_item }}"
 
 
 # Relabel the trees of de-listed paths back to the default policy context, so
@@ -191,17 +197,18 @@
       - "-F" # reset the full context, including the user part
       - "-r"
       - "-v"
-      - "{{ item['item'] }}"
+      - "{{ __host_podman_sefcontext_removal_item['__host_podman_stale_path_item'] }}"
   register: __host_podman_restorecon_reset_result
   changed_when:
     - (__host_podman_restorecon_reset_result['stdout'] | ansible.builtin.length) > 0
   when:
-    - item is ansible.builtin.changed
+    - __host_podman_sefcontext_removal_item is ansible.builtin.changed
     - __host_podman_selinux_stale_stat['results'][__host_podman_selinux_stale_idx]['stat']['exists']
   loop: "{{ __host_podman_sefcontext_removal_result['results'] | ansible.builtin.default([]) }}"
   loop_control:
+    loop_var: "__host_podman_sefcontext_removal_item"
     index_var: "__host_podman_selinux_stale_idx"
-    label: "{{ item['item'] }}"
+    label: "{{ __host_podman_sefcontext_removal_item['__host_podman_stale_path_item'] }}"
 
 
 # Owned after this run: every declared path. Declaration adopts a

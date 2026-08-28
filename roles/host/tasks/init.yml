@@ -122,10 +122,12 @@
   ansible.builtin.include_vars:
     file: "{{ __host_podman_vars_file }}"
   vars:
-    __host_podman_vars_file: "{{ role_path }}/vars/{{ item }}"
+    __host_podman_vars_file: "{{ role_path }}/vars/{{ __host_podman_varsfile_item }}"
   when:
     - __host_podman_vars_file is ansible.builtin.file
   loop: "{{ __host_podman_platform_filenames_most_specific_last }}"
+  loop_control:
+    loop_var: "__host_podman_varsfile_item"
 
 
 # The timer templates accept the following values per directive. The six

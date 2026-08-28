@@ -122,10 +122,12 @@
   ansible.builtin.include_vars:
     file: "{{ __quadlet_podman_vars_file }}"
   vars:
-    __quadlet_podman_vars_file: "{{ role_path }}/vars/{{ item }}"
+    __quadlet_podman_vars_file: "{{ role_path }}/vars/{{ __quadlet_podman_varsfile_item }}"
   when:
     - __quadlet_podman_vars_file is ansible.builtin.file
   loop: "{{ __quadlet_podman_platform_filenames_most_specific_last }}"
+  loop_control:
+    loop_var: "__quadlet_podman_varsfile_item"
 
 
 ### quadlet specific
@@ -628,7 +630,7 @@
             [__quadlet_podman_systemctl_exec_path]
             + (['--user'] if (__quadlet_podman_rootless | ansible.builtin.bool) else [])
             + ['show', '--property=LoadState', '--property=FragmentPath', '--property=SourcePath',
-               '--', __quadlet_podman_collision_service]
+               '--', __quadlet_podman_collision_service_item]
           }}
       become: true
       become_user: "{{ __quadlet_podman_become_user }}"
@@ -639,7 +641,7 @@
       check_mode: false
       loop: "{{ __quadlet_podman_units_effective | ansible.builtin.map(attribute='service') | ansible.builtin.list }}"
       loop_control:
-        loop_var: "__quadlet_podman_collision_service"
+        loop_var: "__quadlet_podman_collision_service_item"
       register: __quadlet_podman_collision_show_result
 
 
@@ -710,7 +712,7 @@
           {%-     set __props = __props | ansible.builtin.combine(
                     {(__line.split('=', 1)[0]): (__line.split('=', 1)[1:] | ansible.builtin.first | ansible.builtin.default(''))}) -%}
           {%-   endfor -%}
-          {%-   set __service = __r['__quadlet_podman_collision_service'] -%}
+          {%-   set __service = __r['__quadlet_podman_collision_service_item'] -%}
           {%-   set __load = __props.get('LoadState', 'not-found') -%}
           {%-   set __fragment = __props.get('FragmentPath', '') -%}
           {%-   set __source = __props.get('SourcePath', '') -%}

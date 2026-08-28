@@ -1,16 +1,16 @@
 # Configuration: Enable (or revert) rootless Podman usage for one user account
 # from host_podman_rootless_users. Included in a loop from config/default.yml
-# (loop_var: __host_podman_ru_raw) and from setup/uninstall/default.yml (which
+# (loop_var: __host_podman_ru_raw_item) and from setup/uninstall/default.yml (which
 # additionally sets __host_podman_ru_force_absent to revert the enablement).
 
 ---
 
-- name: "Config | Rootless | Merge defaults with the entry for '{{ __host_podman_ru_raw['name'] }}'"
+- name: "Config | Rootless | Merge defaults with the entry for '{{ __host_podman_ru_raw_item['name'] }}'"
   ansible.builtin.set_fact:
     __host_podman_ru: >-
       {{
         __host_podman_rootless_user_defaults
-        | ansible.builtin.combine(__host_podman_ru_raw, recursive=true)
+        | ansible.builtin.combine(__host_podman_ru_raw_item, recursive=true)
         | ansible.builtin.combine(
             {'state': 'absent'} if (__host_podman_ru_force_absent | ansible.builtin.default(false)) else {},
             recursive=true
@@ -152,7 +152,7 @@
 
     - name: "Config | Rootless | Remove managed per-user configuration files of '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.file:
-        path: "{{ __host_podman_ru_home_effective }}/{{ __host_podman_user_config_dir_relpath }}/{{ item }}"
+        path: "{{ __host_podman_ru_home_effective }}/{{ __host_podman_user_config_dir_relpath }}/{{ __host_podman_ru_config_item }}"
         state: "absent"
       when:
         - (__host_podman_ru_home_effective | ansible.builtin.length) > 0
@@ -161,7 +161,8 @@
         - "storage.conf"
         - "registries.conf"
       loop_control:
-        label: "{{ item }}"
+        loop_var: "__host_podman_ru_config_item"
+        label: "{{ __host_podman_ru_config_item }}"
 
 
     - name: "Config | Rootless | Remove the manifest of '{{ __host_podman_ru['name'] }}'"
@@ -189,7 +190,7 @@
 
     - name: "Config | Rootless | Read existing subordinate ID assignments"
       ansible.builtin.slurp:
-        src: "{{ item }}"
+        src: "{{ __host_podman_subid_file_item }}"
       register: __host_podman_ru_subid_slurp
       failed_when:
         # tolerate missing files (treated as empty below); lineinfile creates them
@@ -199,7 +200,8 @@
         - "{{ __host_podman_subuid_file_path }}"
         - "{{ __host_podman_subgid_file_path }}"
       loop_control:
-        label: "{{ item }}"
+        loop_var: "__host_podman_subid_file_item"
+        label: "{{ __host_podman_subid_file_item }}"
 
 
     - name: "Config | Rootless | Compute subordinate ID facts for '{{ __host_podman_ru['name'] }}'"
@@ -304,7 +306,7 @@
     # have written anyway.
     - name: "Config | Rootless | Remove duplicate subordinate ID entries for '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.replace:
-        path: "{{ __host_podman_ru_dedup['path'] }}"
+        path: "{{ __host_podman_ru_dedup_item['path'] }}"
         regexp: >-
           ^{{ __host_podman_ru['name'] | ansible.builtin.regex_escape }}:[^\n]*\n(?=[\s\S]*?^{{ __host_podman_ru['name'] | ansible.builtin.regex_escape }}:)
         replace: ""
@@ -314,10 +316,10 @@
         - path: "{{ __host_podman_subgid_file_path }}"
           count: "{{ __host_podman_ru_subgid_line_count }}"
       loop_control:
-        loop_var: "__host_podman_ru_dedup"
-        label: "{{ __host_podman_ru_dedup['path'] }}"
+        loop_var: "__host_podman_ru_dedup_item"
+        label: "{{ __host_podman_ru_dedup_item['path'] }}"
       when:
-        - (__host_podman_ru_dedup['count'] | ansible.builtin.int) > 1
+        - (__host_podman_ru_dedup_item['count'] | ansible.builtin.int) > 1
 
 
     - name: "Config | Rootless | Ensure subordinate UID range for '{{ __host_podman_ru['name'] }}'"

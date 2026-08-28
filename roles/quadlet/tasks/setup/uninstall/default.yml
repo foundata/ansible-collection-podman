@@ -65,7 +65,7 @@
 
 - name: "Setup | Uninstall | Read the manifests of the other applications in this scope"
   ansible.builtin.slurp:
-    src: "{{ item }}"
+    src: "{{ __quadlet_podman_other_manifest_item }}"
   register: __quadlet_podman_other_manifests_slurp
   loop: >-
     {{
@@ -75,7 +75,8 @@
       | ansible.builtin.list
     }}
   loop_control:
-    label: "{{ item }}"
+    loop_var: "__quadlet_podman_other_manifest_item"
+    label: "{{ __quadlet_podman_other_manifest_item }}"
 
 
 - name: "Setup | Uninstall | Determine the resources claimed by the other applications"
@@ -133,7 +134,7 @@
 
     - name: "Setup | Uninstall | Stop the plain systemd units of the application"
       ansible.builtin.systemd_service:
-        name: "{{ __quadlet_podman_owned_path | ansible.builtin.basename }}"
+        name: "{{ __quadlet_podman_owned_path_item | ansible.builtin.basename }}"
         state: "stopped"
         scope: "{{ __quadlet_podman_systemd_scope }}"
       become: true
@@ -145,8 +146,8 @@
         - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
       loop: "{{ __quadlet_podman_systemd_owned_result['stdout_lines'] | ansible.builtin.default([]) }}"
       loop_control:
-        loop_var: "__quadlet_podman_owned_path"
-        label: "{{ __quadlet_podman_owned_path }}"
+        loop_var: "__quadlet_podman_owned_path_item"
+        label: "{{ __quadlet_podman_owned_path_item }}"
 
 
     # Disabling removes the enablement symlinks (e.g. in timers.target.wants/)
@@ -160,7 +161,7 @@
           {{
             [__quadlet_podman_systemctl_exec_path]
             + (['--user'] if (__quadlet_podman_rootless | ansible.builtin.bool) else [])
-            + ['disable', __quadlet_podman_owned_path | ansible.builtin.basename]
+            + ['disable', __quadlet_podman_owned_path_item | ansible.builtin.basename]
           }}
       become: true
       become_user: "{{ __quadlet_podman_become_user }}"
@@ -172,8 +173,8 @@
         - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
       loop: "{{ __quadlet_podman_systemd_owned_result['stdout_lines'] | ansible.builtin.default([]) }}"
       loop_control:
-        loop_var: "__quadlet_podman_owned_path"
-        label: "{{ __quadlet_podman_owned_path }}"
+        loop_var: "__quadlet_podman_owned_path_item"
+        label: "{{ __quadlet_podman_owned_path_item }}"
 
 
     # Clear a possible "failed" state so the unit does not stay pinned in
@@ -184,7 +185,7 @@
           {{
             [__quadlet_podman_systemctl_exec_path]
             + (['--user'] if (__quadlet_podman_rootless | ansible.builtin.bool) else [])
-            + ['reset-failed', __quadlet_podman_owned_path | ansible.builtin.basename]
+            + ['reset-failed', __quadlet_podman_owned_path_item | ansible.builtin.basename]
           }}
       become: true
       become_user: "{{ __quadlet_podman_become_user }}"
@@ -196,18 +197,18 @@
         - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
       loop: "{{ __quadlet_podman_systemd_owned_result['stdout_lines'] | ansible.builtin.default([]) }}"
       loop_control:
-        loop_var: "__quadlet_podman_owned_path"
-        label: "{{ __quadlet_podman_owned_path }}"
+        loop_var: "__quadlet_podman_owned_path_item"
+        label: "{{ __quadlet_podman_owned_path_item }}"
 
 
     - name: "Setup | Uninstall | Remove the plain systemd unit files of the application"
       ansible.builtin.file:
-        path: "{{ __quadlet_podman_owned_path }}"
+        path: "{{ __quadlet_podman_owned_path_item }}"
         state: "absent"
       loop: "{{ __quadlet_podman_systemd_owned_result['stdout_lines'] | ansible.builtin.default([]) }}"
       loop_control:
-        loop_var: "__quadlet_podman_owned_path"
-        label: "{{ __quadlet_podman_owned_path }}"
+        loop_var: "__quadlet_podman_owned_path_item"
+        label: "{{ __quadlet_podman_owned_path_item }}"
       notify:
         - "quadlet_podman: systemd daemon-reload"
 
@@ -246,12 +247,12 @@
     # still exist at this point, so they are the authoritative source.
     - name: "Setup | Uninstall | Read the unit files of the application (service name resolution)"
       ansible.builtin.slurp:
-        src: "{{ __quadlet_podman_owned_path }}"
+        src: "{{ __quadlet_podman_owned_path_item }}"
       register: __quadlet_podman_owned_slurp
       loop: "{{ __quadlet_podman_owned_result['stdout_lines'] | ansible.builtin.default([]) }}"
       loop_control:
-        loop_var: "__quadlet_podman_owned_path"
-        label: "{{ __quadlet_podman_owned_path }}"
+        loop_var: "__quadlet_podman_owned_path_item"
+        label: "{{ __quadlet_podman_owned_path_item }}"
 
 
     - name: "Setup | Uninstall | Map the unit files to their generated service names"
@@ -259,7 +260,7 @@
         __quadlet_podman_owned_service_map: >-
           {%- set __ns = namespace(map={}) -%}
           {%- for __r in (__quadlet_podman_owned_slurp['results'] | ansible.builtin.default([])) -%}
-          {%-   set __path = __r['__quadlet_podman_owned_path'] -%}
+          {%-   set __path = __r['__quadlet_podman_owned_path_item'] -%}
           {%-   set __stem = __path | ansible.builtin.basename | ansible.builtin.splitext | ansible.builtin.first -%}
           {%-   set __ext = __path | ansible.builtin.basename | ansible.builtin.splitext | ansible.builtin.last | ansible.builtin.regex_replace('^\.', '') -%}
           {#-   no capture-group argument on purpose: '\1' as a Jinja string
@@ -287,7 +288,7 @@
       become_user: "{{ __quadlet_podman_become_user }}"
       environment: "{{ __quadlet_podman_task_environment }}"
       vars:
-        __quadlet_podman_owned_service: "{{ __quadlet_podman_owned_service_map[__quadlet_podman_owned_path] }}"
+        __quadlet_podman_owned_service: "{{ __quadlet_podman_owned_service_map[__quadlet_podman_owned_path_item] }}"
       # tolerate services that are not loaded (unit was never started or the
       # generator rejected it)
       failed_when: false
@@ -301,8 +302,8 @@
              | ansible.builtin.select('ansible.builtin.search', '\.pod$') | ansible.builtin.list)
         }}
       loop_control:
-        loop_var: "__quadlet_podman_owned_path"
-        label: "{{ __quadlet_podman_owned_path }}"
+        loop_var: "__quadlet_podman_owned_path_item"
+        label: "{{ __quadlet_podman_owned_path_item }}"
 
 
     # Clear a possible "failed" state so the unit does not stay pinned in
@@ -319,7 +320,7 @@
       become_user: "{{ __quadlet_podman_become_user }}"
       environment: "{{ __quadlet_podman_task_environment }}"
       vars:
-        __quadlet_podman_owned_service: "{{ __quadlet_podman_owned_service_map[__quadlet_podman_owned_path] }}"
+        __quadlet_podman_owned_service: "{{ __quadlet_podman_owned_service_map[__quadlet_podman_owned_path_item] }}"
       changed_when: false
       # tolerate services systemd does not know (unit was never started)
       failed_when: false
@@ -327,18 +328,18 @@
         - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
       loop: "{{ __quadlet_podman_owned_result['stdout_lines'] | ansible.builtin.default([]) }}"
       loop_control:
-        loop_var: "__quadlet_podman_owned_path"
-        label: "{{ __quadlet_podman_owned_path }}"
+        loop_var: "__quadlet_podman_owned_path_item"
+        label: "{{ __quadlet_podman_owned_path_item }}"
 
 
     - name: "Setup | Uninstall | Remove the unit files of the application"
       ansible.builtin.file:
-        path: "{{ __quadlet_podman_owned_path }}"
+        path: "{{ __quadlet_podman_owned_path_item }}"
         state: "absent"
       loop: "{{ __quadlet_podman_owned_result['stdout_lines'] | ansible.builtin.default([]) }}"
       loop_control:
-        loop_var: "__quadlet_podman_owned_path"
-        label: "{{ __quadlet_podman_owned_path }}"
+        loop_var: "__quadlet_podman_owned_path_item"
+        label: "{{ __quadlet_podman_owned_path_item }}"
       notify:
         - "quadlet_podman: systemd daemon-reload"
 
@@ -358,7 +359,7 @@
     # duplicate ownership record) is left for that application.
     - name: "Setup | Uninstall | Remove the Podman secrets of the application"
       containers.podman.podman_secret:
-        name: "{{ __quadlet_podman_secret_name }}"
+        name: "{{ __quadlet_podman_secret_name_item }}"
         state: "absent"
         executable: "{{ __quadlet_podman_podman_exec_path }}"
       become: true
@@ -375,7 +376,7 @@
           | ansible.builtin.list
         }}
       loop_control:
-        loop_var: "__quadlet_podman_secret_name"
+        loop_var: "__quadlet_podman_secret_name_item"
 
 
     # The application's own authentication file is removed as a whole;
@@ -442,17 +443,17 @@
 
     - name: "Setup | Uninstall | Remove the orphaned unit files of the application"
       ansible.builtin.file:
-        path: "{{ __quadlet_podman_orphan_path }}"
+        path: "{{ __quadlet_podman_orphan_path_item }}"
         state: "absent"
       loop: "{{ __quadlet_podman_orphan_owned_result['stdout_lines'] | ansible.builtin.default([]) }}"
       loop_control:
-        loop_var: "__quadlet_podman_orphan_path"
-        label: "{{ __quadlet_podman_orphan_path }}"
+        loop_var: "__quadlet_podman_orphan_path_item"
+        label: "{{ __quadlet_podman_orphan_path_item }}"
 
 
 - name: "Setup | Uninstall | Remove the managed files of the application"
   ansible.builtin.file:
-    path: "{{ __quadlet_podman_file_dest }}"
+    path: "{{ __quadlet_podman_file_dest_item }}"
     state: "absent"
   loop: >-
     {{
@@ -463,7 +464,7 @@
       | ansible.builtin.list
     }}
   loop_control:
-    loop_var: "__quadlet_podman_file_dest"
+    loop_var: "__quadlet_podman_file_dest_item"
 
 
 - name: "Setup | Uninstall | Remove the application manifest"

@@ -146,7 +146,7 @@
 # 2 = policy.json, 3 = its saved original.
 - name: "Config | Default | Check for storage.conf, policy.json and their saved originals"
   ansible.builtin.stat:
-    path: "{{ item }}"
+    path: "{{ __host_podman_config_path_item }}"
     get_checksum: false
     get_mime: false
     get_attributes: false
@@ -157,7 +157,8 @@
     - "{{ __host_podman_policy_file_path }}"
     - "{{ __host_podman_policy_backup_file_path }}"
   loop_control:
-    label: "{{ item }}"
+    loop_var: "__host_podman_config_path_item"
+    label: "{{ __host_podman_config_path_item }}"
 
 
 # Save the distribution original exactly once: only a file that is not yet
@@ -389,5 +390,5 @@
     file: "{{ role_path }}/tasks/config/rootless_user.yml"
   loop: "{{ host_podman_rootless_users }}"
   loop_control:
-    loop_var: "__host_podman_ru_raw"
-    label: "{{ __host_podman_ru_raw['name'] }}"
+    loop_var: "__host_podman_ru_raw_item"
+    label: "{{ __host_podman_ru_raw_item['name'] }}"

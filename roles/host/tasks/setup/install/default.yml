@@ -38,35 +38,37 @@
 
 - name: "Setup | Install | Default | Remove unwanted files and directories (e.g., to prevent conflicts or resolve incompatibilities)"
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: "{{ __host_podman_removal_path_item }}"
     state: "absent"
   when:
     - __host_podman_paths_removal is ansible.builtin.defined
     - (__host_podman_paths_removal | ansible.builtin.length) > 0
   loop: "{{ __host_podman_paths_removal }}"
+  loop_control:
+    loop_var: "__host_podman_removal_path_item"
 
 
 - name: "Setup | Install | Default | Neutralize distribution config files (overwrite to survive package updates)"
   ansible.builtin.copy:
-    dest: "{{ item['key'] }}"
+    dest: "{{ __host_podman_neutralize_item['key'] }}"
     content: |
-      {{ item['value'] }} Managed by Ansible (foundata.podman.host)
-      {{ item['value'] }}
-      {{ item['value'] }} Content intentionally cleared. The original distribution file conflicted
-      {{ item['value'] }} with configuration managed by the foundata.podman.host role.
-      {{ item['value'] }}
-      {{ item['value'] }} To restore the original file content, reinstall the owning package:
+      {{ __host_podman_neutralize_item['value'] }} Managed by Ansible (foundata.podman.host)
+      {{ __host_podman_neutralize_item['value'] }}
+      {{ __host_podman_neutralize_item['value'] }} Content intentionally cleared. The original distribution file conflicted
+      {{ __host_podman_neutralize_item['value'] }} with configuration managed by the foundata.podman.host role.
+      {{ __host_podman_neutralize_item['value'] }}
+      {{ __host_podman_neutralize_item['value'] }} To restore the original file content, reinstall the owning package:
       {% if (ansible_facts['os_family'] | ansible.builtin.lower) == 'debian' %}
-      {{ item['value'] }}   dpkg -S '{{ item['key'] }}'  # find the package that owns this file
-      {{ item['value'] }}   apt-get install --reinstall <package>  # reinstall it to restore the original
+      {{ __host_podman_neutralize_item['value'] }}   dpkg -S '{{ __host_podman_neutralize_item['key'] }}'  # find the package that owns this file
+      {{ __host_podman_neutralize_item['value'] }}   apt-get install --reinstall <package>  # reinstall it to restore the original
       {% elif (ansible_facts['os_family'] | ansible.builtin.lower) == 'suse' %}
-      {{ item['value'] }}   rpm -qf '{{ item['key'] }}'  # find the package that owns this file
-      {{ item['value'] }}   zypper install --force <package>  # reinstall it to restore the original
+      {{ __host_podman_neutralize_item['value'] }}   rpm -qf '{{ __host_podman_neutralize_item['key'] }}'  # find the package that owns this file
+      {{ __host_podman_neutralize_item['value'] }}   zypper install --force <package>  # reinstall it to restore the original
       {% elif (ansible_facts['os_family'] | ansible.builtin.lower) == 'redhat' %}
-      {{ item['value'] }}   rpm -qf '{{ item['key'] }}'  # find the package that owns this file
-      {{ item['value'] }}   dnf reinstall <package>  # reinstall it to restore the original
+      {{ __host_podman_neutralize_item['value'] }}   rpm -qf '{{ __host_podman_neutralize_item['key'] }}'  # find the package that owns this file
+      {{ __host_podman_neutralize_item['value'] }}   dnf reinstall <package>  # reinstall it to restore the original
       {% else %}
-      {{ item['value'] }}   Use your package manager to find the owning package and reinstall it.
+      {{ __host_podman_neutralize_item['value'] }}   Use your package manager to find the owning package and reinstall it.
       {% endif %}
     owner: "root"
     group: "root"
@@ -76,4 +78,5 @@
     - (__host_podman_paths_neutralize | ansible.builtin.length) > 0
   loop: "{{ __host_podman_paths_neutralize | ansible.builtin.dict2items }}"
   loop_control:
-    label: "{{ item['key'] }}"
+    loop_var: "__host_podman_neutralize_item"
+    label: "{{ __host_podman_neutralize_item['key'] }}"

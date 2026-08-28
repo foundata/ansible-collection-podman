@@ -47,7 +47,7 @@
 # filtering as above.
 - name: "Handlers | Restart application systemd units"
   ansible.builtin.systemd_service:
-    name: "{{ __quadlet_podman_systemd_unit_name }}"
+    name: "{{ __quadlet_podman_systemd_unit_name_item }}"
     state: "restarted"
     scope: "{{ __quadlet_podman_systemd_scope }}"
   become: true
@@ -58,7 +58,7 @@
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
   loop: "{{ __quadlet_podman_systemd_units_restart }}"
   loop_control:
-    loop_var: "__quadlet_podman_systemd_unit_name"
-    label: "{{ __quadlet_podman_systemd_unit_name }}"
+    loop_var: "__quadlet_podman_systemd_unit_name_item"
+    label: "{{ __quadlet_podman_systemd_unit_name_item }}"
   listen:
     - "quadlet_podman: restart application systemd units"
