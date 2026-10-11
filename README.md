@@ -1,5 +1,10 @@
 # Ansible collection: `foundata.podman`
 
+<!--
+SPDX-FileCopyrightText: foundata GmbH <https://foundata.com>
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 This repository contains the `foundata.podman` Ansible Collection.
 
 It provides resources to manage and use [Podman](https://podman.io/), a

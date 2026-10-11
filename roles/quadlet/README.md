@@ -1,5 +1,10 @@
 # Ansible role: `foundata.podman.quadlet`
 
+<!--
+SPDX-FileCopyrightText: foundata GmbH <https://foundata.com>
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 The `foundata.podman.quadlet` Ansible role (part of the `foundata.podman` Ansible collection).
 
 

@@ -1,6 +1,9 @@
 # Execute the collection role "quadlet" against all driver-created instances:
 # one rootful application ("webtest") and one rootless application ("usertest",
 # running as the account created in role-host.yml).
+#
+# SPDX-FileCopyrightText: foundata GmbH <https://foundata.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 - name: "Molecule | Converge | Include the foundata.podman.quadlet role (rootful application)"
   ansible.builtin.include_role:

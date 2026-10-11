@@ -2,6 +2,9 @@
 # from host_podman_rootless_users. Included in a loop from config/default.yml
 # (loop_var: __host_podman_ru_raw_item) and from setup/uninstall/default.yml (which
 # additionally sets __host_podman_ru_force_absent to revert the enablement).
+#
+# SPDX-FileCopyrightText: foundata GmbH <https://foundata.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 ---
 

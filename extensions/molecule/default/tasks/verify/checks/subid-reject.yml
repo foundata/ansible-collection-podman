@@ -3,6 +3,9 @@
 # the role's init and expects it to fail in the subordinate ID validation. The
 # previous value is restored afterwards, so later tasks keep seeing the
 # converge state.
+#
+# SPDX-FileCopyrightText: foundata GmbH <https://foundata.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 - name: "Molecule | Verify | Subid reject | save the current list: {{ __testing_reject_case['label'] }}"
   ansible.builtin.set_fact:

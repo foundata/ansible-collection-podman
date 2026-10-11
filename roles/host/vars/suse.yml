@@ -5,6 +5,9 @@
 #
 # Note: openSUSE Leap 16.0 uses SELinux (not AppArmor) as its default mandatory
 # access control system, so the SELinux tooling applies here as well.
+#
+# SPDX-FileCopyrightText: foundata GmbH <https://foundata.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 ---
 

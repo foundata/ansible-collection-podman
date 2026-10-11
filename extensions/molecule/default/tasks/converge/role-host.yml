@@ -1,4 +1,7 @@
 # Execute the collection role "host" against all driver-created instances.
+#
+# SPDX-FileCopyrightText: foundata GmbH <https://foundata.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 # The rootless test account is created here (the role does not create
 # accounts; foundata.linux.user would do this in real deployments).

@@ -1,4 +1,7 @@
 # Verify the state after the "host" role converge.
+#
+# SPDX-FileCopyrightText: foundata GmbH <https://foundata.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 - name: "Molecule | Verify | host | Determine the installed Podman version"
   ansible.builtin.command:

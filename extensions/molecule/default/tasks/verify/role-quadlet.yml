@@ -1,5 +1,8 @@
 # Verify the state after the "quadlet" role converge (the rootful "webtest"
 # and the rootless "usertest" application).
+#
+# SPDX-FileCopyrightText: foundata GmbH <https://foundata.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 ### Rootful application ("webtest")
 
