@@ -34,7 +34,10 @@
 
 - name: "Molecule | Verify | quadlet | Query the state of the overridden and the derived service name"
   ansible.builtin.command:
-    argv: ["systemctl", "is-active", "{{ item }}"]
+    argv:
+      - "systemctl"
+      - "is-active"
+      - "{{ item }}"
   register: __testing_quadlet_svcname_state
   changed_when:
     - false
@@ -61,7 +64,11 @@
 # -> podman --env -> container): the variable has to arrive with both words.
 - name: "Molecule | Verify | quadlet | Read the environment of the running webtest container"
   ansible.builtin.command:
-    argv: ["podman", "exec", "webtest", "env"]
+    argv:
+      - "podman"
+      - "exec"
+      - "webtest"
+      - "env"
   register: __testing_quadlet_webtest_env
   changed_when:
     - false
@@ -197,10 +204,14 @@
   changed_when: false
   failed_when: false
   loop:
-    - ["is-enabled", "webtest-job.timer"]
-    - ["is-active", "webtest-job.timer"]
-    - ["is-enabled", "webtest-sock.socket"]
-    - ["is-active", "webtest-sock.socket"]
+    - - "is-enabled"
+      - "webtest-job.timer"
+    - - "is-active"
+      - "webtest-job.timer"
+    - - "is-enabled"
+      - "webtest-sock.socket"
+    - - "is-active"
+      - "webtest-sock.socket"
   register: __testing_quadlet_timer_state_result
 
 
@@ -389,9 +400,12 @@
   changed_when: false
   failed_when: false
   loop:
-    - ["is-enabled", "usertest-job.timer"]
-    - ["is-active", "usertest-job.timer"]
-    - ["is-active", "usertest-job.service"]
+    - - "is-enabled"
+      - "usertest-job.timer"
+    - - "is-active"
+      - "usertest-job.timer"
+    - - "is-active"
+      - "usertest-job.service"
   register: __testing_quadlet_userunit_state_result
 
 
@@ -762,8 +776,12 @@
   changed_when:
     - false
   loop:
-    - ["cat", "/var/lib/webtest/app.env"]
-    - ["podman", "secret", "inspect", "webtest_secret"]
+    - - "cat"
+      - "/var/lib/webtest/app.env"
+    - - "podman"
+      - "secret"
+      - "inspect"
+      - "webtest_secret"
 
 
 - name: "Molecule | Verify | quadlet | Absent ownership: request the foreign file and secret absent (must fail)"
@@ -807,8 +825,12 @@
   changed_when:
     - false
   loop:
-    - ["cat", "/var/lib/webtest/app.env"]
-    - ["podman", "secret", "inspect", "webtest_secret"]
+    - - "cat"
+      - "/var/lib/webtest/app.env"
+    - - "podman"
+      - "secret"
+      - "inspect"
+      - "webtest_secret"
 
 
 - name: "Molecule | Verify | quadlet | Absent ownership: get information about the rejected application's manifest"
@@ -990,7 +1012,11 @@
 
 - name: "Molecule | Verify | quadlet | Absent ownership: query the removed secret"
   ansible.builtin.command:
-    argv: ["podman", "secret", "inspect", "absenttest_secret"]
+    argv:
+      - "podman"
+      - "secret"
+      - "inspect"
+      - "absenttest_secret"
   register: __testing_quadlet_absown_secret
   changed_when:
     - false
@@ -1493,7 +1519,10 @@
 
 - name: "Molecule | Verify | quadlet | Absent: query the ServiceName-overridden service"
   ansible.builtin.command:
-    argv: ["systemctl", "is-active", "webtest-alias.service"]
+    argv:
+      - "systemctl"
+      - "is-active"
+      - "webtest-alias.service"
   register: __testing_quadlet_absent_alias
   changed_when:
     - false
@@ -1566,7 +1595,11 @@
 
 - name: "Molecule | Verify | quadlet | Rotation: read the container environment (value 1)"
   ansible.builtin.command:
-    argv: ["podman", "exec", "rotatest", "env"]
+    argv:
+      - "podman"
+      - "exec"
+      - "rotatest"
+      - "env"
   register: __testing_quadlet_rotate_env1
   changed_when:
     - false
@@ -1602,7 +1635,11 @@
 
 - name: "Molecule | Verify | quadlet | Rotation: read the container environment (value 2)"
   ansible.builtin.command:
-    argv: ["podman", "exec", "rotatest", "env"]
+    argv:
+      - "podman"
+      - "exec"
+      - "rotatest"
+      - "env"
   register: __testing_quadlet_rotate_env2
   changed_when:
     - false
@@ -1649,7 +1686,11 @@
 
 - name: "Molecule | Verify | quadlet | Ownership: read the container environment after the rejected claim"
   ansible.builtin.command:
-    argv: ["podman", "exec", "rotatest", "env"]
+    argv:
+      - "podman"
+      - "exec"
+      - "rotatest"
+      - "env"
   register: __testing_quadlet_rotate_env3
   changed_when:
     - false
@@ -1821,7 +1862,10 @@
 
 - name: "Molecule | Verify | quadlet | Rename: query both service generations"
   ansible.builtin.command:
-    argv: ["systemctl", "is-active", "{{ item }}"]
+    argv:
+      - "systemctl"
+      - "is-active"
+      - "{{ item }}"
   register: __testing_quadlet_rename_state
   changed_when:
     - false
@@ -1850,7 +1894,10 @@
 
 - name: "Molecule | Verify | quadlet | Rename: query the v2 and derived generations"
   ansible.builtin.command:
-    argv: ["systemctl", "is-active", "{{ item }}"]
+    argv:
+      - "systemctl"
+      - "is-active"
+      - "{{ item }}"
   register: __testing_quadlet_rename_state2
   changed_when:
     - false
@@ -1880,7 +1927,10 @@
 
 - name: "Molecule | Verify | quadlet | Rename: query the derived and v4 generations"
   ansible.builtin.command:
-    argv: ["systemctl", "is-active", "{{ item }}"]
+    argv:
+      - "systemctl"
+      - "is-active"
+      - "{{ item }}"
   register: __testing_quadlet_rename_state3
   changed_when:
     - false
@@ -1943,7 +1993,10 @@
 
 - name: "Molecule | Verify | quadlet | Rename: query the v4 and v5 generations"
   ansible.builtin.command:
-    argv: ["systemctl", "is-active", "{{ item }}"]
+    argv:
+      - "systemctl"
+      - "is-active"
+      - "{{ item }}"
   register: __testing_quadlet_rename_state4
   changed_when:
     - false
@@ -1985,7 +2038,9 @@
 # units-only application failed after writing its units).
 - name: "Molecule | Verify | quadlet | Transition: remove the empty manifest scope directory"
   ansible.builtin.command:
-    argv: ["rmdir", "/var/lib/ansible-podman-quadlet/system"]
+    argv:
+      - "rmdir"
+      - "/var/lib/ansible-podman-quadlet/system"
   changed_when:
     - true
   failed_when:
@@ -2014,7 +2069,10 @@
 
 - name: "Molecule | Verify | quadlet | Transition: query the enablement (with Install)"
   ansible.builtin.command:
-    argv: ["systemctl", "is-enabled", "transtest.service"]
+    argv:
+      - "systemctl"
+      - "is-enabled"
+      - "transtest.service"
   register: __testing_quadlet_trans_enabled
   changed_when:
     - false
@@ -2041,7 +2099,10 @@
 
 - name: "Molecule | Verify | quadlet | Transition: query the enablement and activity (without Install)"
   ansible.builtin.command:
-    argv: ["systemctl", "{{ item }}", "transtest.service"]
+    argv:
+      - "systemctl"
+      - "{{ item }}"
+      - "transtest.service"
   register: __testing_quadlet_trans_after
   changed_when:
     - false

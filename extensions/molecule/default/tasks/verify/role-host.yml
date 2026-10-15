@@ -1202,7 +1202,11 @@
 
     - name: "Molecule | Verify | host | SELinux: list the local file context customizations"
       ansible.builtin.command:
-        argv: ["semanage", "fcontext", "--list", "-C"]
+        argv:
+          - "semanage"
+          - "fcontext"
+          - "--list"
+          - "-C"
       register: __testing_host_selinux_list
       changed_when:
         - false
@@ -1265,7 +1269,11 @@
 
     - name: "Molecule | Verify | host | SELinux: list the customizations after de-listing"
       ansible.builtin.command:
-        argv: ["semanage", "fcontext", "--list", "-C"]
+        argv:
+          - "semanage"
+          - "fcontext"
+          - "--list"
+          - "-C"
       register: __testing_host_selinux_list_after
       changed_when:
         - false
