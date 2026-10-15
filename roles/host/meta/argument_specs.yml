@@ -13,6 +13,8 @@ argument_specs:
   # foundata.podman/roles/host/tasks/main.yml entry point
   main:
     short_description: "Main entry point for the foundata.podman.host role"
+    description: |
+      Install and configure Podman container hosts.
     options:
 
       host_podman_state:

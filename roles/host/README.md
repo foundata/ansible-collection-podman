@@ -173,23 +173,25 @@ There are also tags that are generally not intended to be called directly but ar
 
 Main entry point for the foundata.podman.host role
 
+Install and configure Podman container hosts.
+
 The following variables can be configured for this role:
 
-| Variable | Type | Required | Default | Description (abstract) |
-|----------|------|----------|---------|------------------------|
-| `host_podman_state` | `str` | No | `"present"` | Determines whether the managed resources should be `present` or `absent`.<br><br>`present` ensures that required components, such as software packages, are installed and configured.<br><br>`absent` reverts changes as much as possible, such as […](#variable-host_podman_state) |
-| `host_podman_autoupgrade` | `bool` | No | `false` | If set to `true`, all managed packages will be upgraded during each Ansible run (e.g., when the package provider detects a newer version than the currently installed one).<br><br>Note: This only affects the packages that provide Podman and its […](#variable-host_podman_autoupgrade) |
-| `host_podman_service_state` | `str` | No | `"enabled"` | Defines the status of the service(s).<br><br>`enabled`: Service is running and will start automatically at boot.<br><br>`disabled`: Service is stopped and will not start automatically at boot.<br><br>`running`: Service is running but will not start […](#variable-host_podman_service_state) |
-| `host_podman_containers` | `dict` | No | `{}` | Additional settings for the system-wide Podman container engine configuration at `/etc/containers/containers.conf`.<br><br>Dictionary structure:<br><br>- Keys: TOML section names of `containers.conf` (e.g. `containers`, `engine`, `network`, […](#variable-host_podman_containers) |
-| `host_podman_storage` | `dict` | No | `{}` | Additional settings for the system-wide Podman storage configuration at `/etc/containers/storage.conf`.<br><br>Dictionary structure:<br><br>- Keys: TOML section names of `storage.conf` (e.g. `storage`, `storage.options`, `storage.options.overlay`). - […](#variable-host_podman_storage) |
-| `host_podman_registries` | `dict` | No | `{}` | Additional settings for the system-wide container image registry configuration at `/etc/containers/registries.conf`.<br><br>Dictionary structure:<br><br>- Keys: Top-level TOML settings of `registries.conf` (e.g. `unqualified-search-registries`, […](#variable-host_podman_registries) |
-| `host_podman_policy` | `dict` | No | `{}` | Container image trust / signature-verification policy, written to `/etc/containers/policy.json`.<br><br>If empty (the default), the distribution's stock `policy.json` is left untouched. If a policy is supplied, it is rendered verbatim as JSON and […](#variable-host_podman_policy) |
-| `host_podman_auto_update` | `bool` | No | `true` | Whether the role manages the system-wide `podman-auto-update.timer` which periodically pulls newer images for containers labeled with `AutoUpdate=registry` or `AutoUpdate=local` and restarts their systemd units.<br><br>If `true`, the timer is managed […](#variable-host_podman_auto_update) |
-| `host_podman_auto_update_timer_settings` | `dict` | No | `{}` | Configuration for the systemd timer that triggers the automatic container image update run (`podman-auto-update.timer`). This dictionary controls when and how often updates are checked and applied.<br><br>These settings map to systemd timer unit […](#variable-host_podman_auto_update_timer_settings) |
-| `host_podman_docker_compat` | `bool` | No | `false` | If set to `true`, Docker compatibility gets installed and enabled: the `podman-docker` package (providing a `docker` command alias) and the Podman API socket (`podman.socket`, providing a Docker-compatible API at `/run/podman/podman.sock` for tools […](#variable-host_podman_docker_compat) |
-| `host_podman_rootless_users` | `list` | No | `[]` | List of existing user accounts to be enabled for rootless Podman usage.<br><br>For each listed account, the role ensures the prerequisites for running rootless containers that start at boot and keep running without an interactive login session: […](#variable-host_podman_rootless_users) |
-| `host_podman_selinux_manage` | `bool` | No | `true` | Whether the role manages SELinux settings related to container storage (file contexts for the paths listed in `host_podman_selinux_label_paths`, including running `restorecon` on changes). Only effective on platforms with SELinux; ignored […](#variable-host_podman_selinux_manage) |
-| `host_podman_selinux_label_paths` | `list` | No | `[]` | List of additional filesystem paths that should carry the SELinux file contexts required for container storage (equivalent to `/var/lib/containers`). Use this when relocating storage, e.g. for a custom rootful `graphroot` or a central rootless […](#variable-host_podman_selinux_label_paths) |
+|                 Variable                 |  Type  | Required |   Default   | Description (abstract) |
+| ---------------------------------------- | ------ | -------- | ----------- | ---------------------- |
+| `host_podman_state`                      | `str`  | No       | `"present"` | Determines whether the managed resources should be `present` or `absent`.<br><br>`present` ensures that required components, such as software packages, are installed and configured.<br><br>`absent` reverts changes as much as possible, such as […](#variable-host_podman_state) |
+| `host_podman_autoupgrade`                | `bool` | No       | `false`     | If set to `true`, all managed packages will be upgraded during each Ansible run (e.g., when the package provider detects a newer version than the currently installed one).<br><br>Note: This only affects the packages that provide Podman and its […](#variable-host_podman_autoupgrade) |
+| `host_podman_service_state`              | `str`  | No       | `"enabled"` | Defines the status of the service(s).<br><br>`enabled`: Service is running and will start automatically at boot.<br><br>`disabled`: Service is stopped and will not start automatically at boot.<br><br>`running`: Service is running but will not start […](#variable-host_podman_service_state) |
+| `host_podman_containers`                 | `dict` | No       | `{}`        | Additional settings for the system-wide Podman container engine configuration at `/etc/containers/containers.conf`.<br><br>Dictionary structure:<br><br>- Keys: TOML section names of `containers.conf` (e.g. `containers`, `engine`, `network`, […](#variable-host_podman_containers) |
+| `host_podman_storage`                    | `dict` | No       | `{}`        | Additional settings for the system-wide Podman storage configuration at `/etc/containers/storage.conf`.<br><br>Dictionary structure:<br><br>- Keys: TOML section names of `storage.conf` (e.g. `storage`, `storage.options`, `storage.options.overlay`). - […](#variable-host_podman_storage) |
+| `host_podman_registries`                 | `dict` | No       | `{}`        | Additional settings for the system-wide container image registry configuration at `/etc/containers/registries.conf`.<br><br>Dictionary structure:<br><br>- Keys: Top-level TOML settings of `registries.conf` (e.g. `unqualified-search-registries`, […](#variable-host_podman_registries) |
+| `host_podman_policy`                     | `dict` | No       | `{}`        | Container image trust / signature-verification policy, written to `/etc/containers/policy.json`.<br><br>If empty (the default), the distribution's stock `policy.json` is left untouched. If a policy is supplied, it is rendered verbatim as JSON and […](#variable-host_podman_policy) |
+| `host_podman_auto_update`                | `bool` | No       | `true`      | Whether the role manages the system-wide `podman-auto-update.timer` which periodically pulls newer images for containers labeled with `AutoUpdate=registry` or `AutoUpdate=local` and restarts their systemd units.<br><br>If `true`, the timer is managed […](#variable-host_podman_auto_update) |
+| `host_podman_auto_update_timer_settings` | `dict` | No       | `{}`        | Configuration for the systemd timer that triggers the automatic container image update run (`podman-auto-update.timer`). This dictionary controls when and how often updates are checked and applied.<br><br>These settings map to systemd timer unit […](#variable-host_podman_auto_update_timer_settings) |
+| `host_podman_docker_compat`              | `bool` | No       | `false`     | If set to `true`, Docker compatibility gets installed and enabled: the `podman-docker` package (providing a `docker` command alias) and the Podman API socket (`podman.socket`, providing a Docker-compatible API at `/run/podman/podman.sock` for tools […](#variable-host_podman_docker_compat) |
+| `host_podman_rootless_users`             | `list` | No       | `[]`        | List of existing user accounts to be enabled for rootless Podman usage.<br><br>For each listed account, the role ensures the prerequisites for running rootless containers that start at boot and keep running without an interactive login session: […](#variable-host_podman_rootless_users) |
+| `host_podman_selinux_manage`             | `bool` | No       | `true`      | Whether the role manages SELinux settings related to container storage (file contexts for the paths listed in `host_podman_selinux_label_paths`, including running `restorecon` on changes). Only effective on platforms with SELinux; ignored […](#variable-host_podman_selinux_manage) |
+| `host_podman_selinux_label_paths`        | `list` | No       | `[]`        | List of additional filesystem paths that should carry the SELinux file contexts required for container storage (equivalent to `/var/lib/containers`). Use this when relocating storage, e.g. for a custom rootful `graphroot` or a central rootless […](#variable-host_podman_selinux_label_paths) |
 
 ### `host_podman_state`<a id="variable-host_podman_state"></a>
 
@@ -296,7 +298,7 @@ host_podman_containers:
 ```
 
 See `man containers.conf` or
-https://github.com/containers/common/blob/main/docs/containers.conf.5.md
+<https://github.com/containers/common/blob/main/docs/containers.conf.5.md>
 for all available settings.
 
 - **Type**: `dict`
@@ -343,7 +345,7 @@ that original, or removes the role-written file when no original existed
 base values).
 
 See `man containers-storage.conf` or
-https://github.com/containers/storage/blob/main/docs/containers-storage.conf.5.md
+<https://github.com/containers/storage/blob/main/docs/containers-storage.conf.5.md>
 for all available settings.
 
 - **Type**: `dict`
@@ -381,7 +383,7 @@ host_podman_registries:
 ```
 
 See `man containers-registries.conf` or
-https://github.com/containers/image/blob/main/docs/containers-registries.conf.5.md
+<https://github.com/containers/image/blob/main/docs/containers-registries.conf.5.md>
 for all available settings.
 
 - **Type**: `dict`
@@ -425,7 +427,7 @@ host_podman_policy:
 ```
 
 See `man containers-policy.json` or
-https://github.com/containers/image/blob/main/docs/containers-policy.json.5.md
+<https://github.com/containers/image/blob/main/docs/containers-policy.json.5.md>
 for the full syntax.
 
 - **Type**: `dict`
@@ -488,11 +490,13 @@ Value contract for the six repeatable trigger directives (`OnCalendar`,
 
 - They also accept a YAML list and render one assignment per entry, so
   several expressions of the same directive can be combined:
+
   ```yaml
   OnCalendar:
     - "Mon..Fri 03:00"
     - "Sat,Sun 05:00"
   ```
+
 - An empty list drops the role's built-in default for that directive
   (e.g. to run a purely monotonic timer without a calendar schedule).
   At least one trigger must remain overall.
@@ -783,7 +787,6 @@ host_podman_selinux_label_paths:
 - **Required**: No
 - **Default**: `[]`
 - **List Elements**: `str`
-
 
 
 
