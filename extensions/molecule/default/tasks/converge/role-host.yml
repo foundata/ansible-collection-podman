@@ -1,3 +1,4 @@
+---
 # Execute the collection role "host" against all driver-created instances.
 #
 # SPDX-FileCopyrightText: foundata GmbH <https://foundata.com>
@@ -14,7 +15,6 @@
     create_home: true
     shell: "/bin/bash"
     password: "!"
-
 
 - name: "Molecule | Converge | Include the foundata.podman.host role" # noqa: no-tabs (deliberate escaping stress fixture)
   ansible.builtin.include_role:

@@ -1,3 +1,4 @@
+---
 # Verify the state after the "quadlet" role converge (the rootful "webtest"
 # and the rootless "usertest" application).
 #
@@ -10,7 +11,6 @@
   ansible.builtin.slurp:
     src: "/etc/containers/systemd/webtest.container"
   register: __testing_quadlet_webtest_unit_slurp
-
 
 - name: "Molecule | Verify | quadlet | Check the webtest container unit content"
   ansible.builtin.assert:
@@ -29,7 +29,6 @@
   vars:
     __testing_quadlet_webtest_unit_content: "{{ __testing_quadlet_webtest_unit_slurp['content'] | ansible.builtin.b64decode }}"
 
-
 ## ServiceName override ("svctest" unit, service "webtest-alias.service")
 
 - name: "Molecule | Verify | quadlet | Query the state of the overridden and the derived service name"
@@ -38,7 +37,6 @@
       - "systemctl"
       - "is-active"
       - "{{ item }}"
-  register: __testing_quadlet_svcname_state
   changed_when:
     - false
   failed_when:
@@ -47,7 +45,7 @@
     - "webtest-alias.service"
     - "svctest.service"
 
-
+  register: __testing_quadlet_svcname_state
 - name: "Molecule | Verify | quadlet | Assert the service runs under the overridden name only"
   ansible.builtin.assert:
     that:
@@ -59,7 +57,6 @@
       svctest.service={{ __testing_quadlet_svcname_state['results'][1]['stdout'] }}.
     success_msg: "The unit runs as webtest-alias.service, as its ServiceName demands."
 
-
 # The quoting must survive the whole chain (unit file -> Quadlet generator
 # -> podman --env -> container): the variable has to arrive with both words.
 - name: "Molecule | Verify | quadlet | Read the environment of the running webtest container"
@@ -69,11 +66,10 @@
       - "exec"
       - "webtest"
       - "env"
-  register: __testing_quadlet_webtest_env
   changed_when:
     - false
 
-
+  register: __testing_quadlet_webtest_env
 - name: "Molecule | Verify | quadlet | Assert the whitespace environment value arrived intact"
   ansible.builtin.assert:
     that:
@@ -84,23 +80,21 @@
       {{ __testing_quadlet_webtest_env['stdout_lines'] | ansible.builtin.select('ansible.builtin.match', '^WEBTEST_') | ansible.builtin.list }}
     success_msg: "Whitespace-containing environment values arrive in the container intact."
 
-
 - name: "Molecule | Verify | quadlet | Query the webtest service state"
   ansible.builtin.command:
     argv:
       - "systemctl"
       - "is-active"
       - "webtest.service"
+  changed_when:
+    - false
+
   register: __testing_quadlet_webtest_active_result
-  changed_when: false
-
-
 - name: "Molecule | Verify | quadlet | Check the webtest service is active"
   ansible.builtin.assert:
     that:
       - __testing_quadlet_webtest_active_result['stdout'] == 'active'
     quiet: true
-
 
 - name: "Molecule | Verify | quadlet | Query the Podman secrets"
   ansible.builtin.command:
@@ -110,22 +104,20 @@
       - "ls"
       - "--format"
       - "{{ '{{.Name}}' }}"
+  changed_when:
+    - false
+
   register: __testing_quadlet_secret_result
-  changed_when: false
-
-
 - name: "Molecule | Verify | quadlet | Check the webtest secret exists"
   ansible.builtin.assert:
     that:
       - "'webtest_secret' in __testing_quadlet_secret_result['stdout_lines']"
     quiet: true
 
-
 - name: "Molecule | Verify | quadlet | Read the webtest environment file"
   ansible.builtin.slurp:
     src: "/var/lib/webtest/app.env"
   register: __testing_quadlet_webtest_env_slurp
-
 
 - name: "Molecule | Verify | quadlet | Check the webtest environment file content"
   ansible.builtin.assert:
@@ -133,14 +125,12 @@
       - "'WEBTEST_GREETING=hello' in (__testing_quadlet_webtest_env_slurp['content'] | ansible.builtin.b64decode)"
     quiet: true
 
-
 ## Run-once patterns and plain systemd units (rootful "webtest")
 
 - name: "Molecule | Verify | quadlet | Read the webtest-job container unit file"
   ansible.builtin.slurp:
     src: "/etc/containers/systemd/webtest-job.container"
   register: __testing_quadlet_job_unit_slurp
-
 
 - name: "Molecule | Verify | quadlet | Check the null-drop rendering of the webtest-job unit"
   ansible.builtin.assert:
@@ -158,12 +148,10 @@
   vars:
     __testing_quadlet_job_unit_content: "{{ __testing_quadlet_job_unit_slurp['content'] | ansible.builtin.b64decode }}"
 
-
 - name: "Molecule | Verify | quadlet | Read the webtest-job timer unit file"
   ansible.builtin.slurp:
     src: "/etc/systemd/system/webtest-job.timer"
   register: __testing_quadlet_timer_unit_slurp
-
 
 - name: "Molecule | Verify | quadlet | Check the webtest-job timer unit content"
   ansible.builtin.assert:
@@ -177,12 +165,10 @@
   vars:
     __testing_quadlet_timer_unit_content: "{{ __testing_quadlet_timer_unit_slurp['content'] | ansible.builtin.b64decode }}"
 
-
 - name: "Molecule | Verify | quadlet | Read the webtest-sock socket unit file"
   ansible.builtin.slurp:
     src: "/etc/systemd/system/webtest-sock.socket"
   register: __testing_quadlet_socket_unit_slurp
-
 
 - name: "Molecule | Verify | quadlet | Check the webtest-sock socket unit content"
   ansible.builtin.assert:
@@ -194,15 +180,16 @@
   vars:
     __testing_quadlet_socket_unit_content: "{{ __testing_quadlet_socket_unit_slurp['content'] | ansible.builtin.b64decode }}"
 
-
 - name: "Molecule | Verify | quadlet | Query the webtest-job timer and webtest-sock socket state"
   ansible.builtin.command:
     argv:
       - "systemctl"
       - "{{ item[0] }}"
       - "{{ item[1] }}"
-  changed_when: false
-  failed_when: false
+  changed_when:
+    - false
+  failed_when:
+    - false
   loop:
     - - "is-enabled"
       - "webtest-job.timer"
@@ -213,7 +200,6 @@
     - - "is-active"
       - "webtest-sock.socket"
   register: __testing_quadlet_timer_state_result
-
 
 - name: "Molecule | Verify | quadlet | Check the webtest-job timer and webtest-sock socket are enabled and active"
   ansible.builtin.assert:
@@ -228,20 +214,20 @@
       {{ __testing_quadlet_timer_state_result['results'] | ansible.builtin.map(attribute='stdout') | ansible.builtin.list }}
     quiet: true
 
-
 - name: "Molecule | Verify | quadlet | Query the run-once service states"
   ansible.builtin.command:
     argv:
       - "systemctl"
       - "is-active"
       - "{{ item }}"
-  changed_when: false
-  failed_when: false
+  changed_when:
+    - false
+  failed_when:
+    - false
   loop:
     - "webtest-job.service"
     - "webtest-init.service"
   register: __testing_quadlet_runonce_state_result
-
 
 - name: "Molecule | Verify | quadlet | Check the run-once service states"
   ansible.builtin.assert:
@@ -256,7 +242,6 @@
       active):
       {{ __testing_quadlet_runonce_state_result['results'] | ansible.builtin.map(attribute='stdout') | ansible.builtin.list }}
     quiet: true
-
 
 ## Check mode on the deployed application
 #
@@ -276,12 +261,10 @@
     quadlet_podman_app: "webtest"
     quadlet_podman_state: "present"
 
-
 - name: "Molecule | Verify | quadlet | Check mode: get information about the webtest unit file"
   ansible.builtin.stat:
     path: "/etc/containers/systemd/webtest.container"
   register: __testing_quadlet_checkmode_unit_stat
-
 
 - name: "Molecule | Verify | quadlet | Check mode: assert nothing was changed"
   ansible.builtin.assert:
@@ -290,14 +273,12 @@
     fail_msg: "The check-mode run removed the deployed webtest unit file."
     success_msg: "The check-mode run succeeded without changing the deployed application."
 
-
 ### Rootless application ("usertest", account "containerapp")
 
 - name: "Molecule | Verify | quadlet | Read the usertest container unit file (rootless)"
   ansible.builtin.slurp:
     src: "/var/lib/podman/containerapp/.config/containers/systemd/usertest.container"
   register: __testing_quadlet_usertest_unit_slurp
-
 
 - name: "Molecule | Verify | quadlet | Check the usertest container unit content (rootless)"
   ansible.builtin.assert:
@@ -308,38 +289,35 @@
   vars:
     __testing_quadlet_usertest_unit_content: "{{ __testing_quadlet_usertest_unit_slurp['content'] | ansible.builtin.b64decode }}"
 
-
 - name: "Molecule | Verify | quadlet | Determine the UID of the rootless account"
   ansible.builtin.getent:
     database: "passwd"
     key: "containerapp"
 
-
 # The molecule instances are virtual machines, so the rootless START is
 # testable on every platform (see the comment in
 # tasks/converge/role-quadlet.yml).
 - name: "Molecule | Verify | quadlet | Query the usertest service state (rootless)"
+  become: true
   ansible.builtin.command:
     argv:
       - "systemctl"
       - "--user"
       - "is-active"
       - "usertest.service"
-  become: true
   become_user: "containerapp"
   environment:
     XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts['getent_passwd']['containerapp'][1] }}"
     DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ ansible_facts['getent_passwd']['containerapp'][1] }}/bus"
+  changed_when:
+    - false
+
   register: __testing_quadlet_usertest_active_result
-  changed_when: false
-
-
 - name: "Molecule | Verify | quadlet | Check the usertest service is active (rootless)"
   ansible.builtin.assert:
     that:
       - __testing_quadlet_usertest_active_result['stdout'] == 'active'
     quiet: true
-
 
 # The manifest's file paths get removed with root privileges on later runs,
 # so the rootless account must not be able to edit it: root-owned, not
@@ -350,7 +328,6 @@
   ansible.builtin.stat:
     path: "/var/lib/ansible-podman-quadlet/user-containerapp/usertest.ansible-manifest"
   register: __testing_quadlet_usertest_manifest_stat
-
 
 - name: "Molecule | Verify | quadlet | Check the rootless manifest is out of the account's reach"
   ansible.builtin.assert:
@@ -365,14 +342,12 @@
       file deletion with root privileges.
     success_msg: "The rootless manifest is root-owned and out of the account's reach."
 
-
 ## Plain systemd user units (rootless "usertest")
 
 - name: "Molecule | Verify | quadlet | Read the usertest-job timer unit file (rootless)"
   ansible.builtin.slurp:
     src: "/var/lib/podman/containerapp/.config/systemd/user/usertest-job.timer"
   register: __testing_quadlet_usertimer_slurp
-
 
 - name: "Molecule | Verify | quadlet | Check the usertest-job timer unit content (rootless)"
   ansible.builtin.assert:
@@ -384,21 +359,22 @@
   vars:
     __testing_quadlet_usertimer_content: "{{ __testing_quadlet_usertimer_slurp['content'] | ansible.builtin.b64decode }}"
 
-
 - name: "Molecule | Verify | quadlet | Query the plain user unit states (rootless)"
+  become: true
   ansible.builtin.command:
     argv:
       - "systemctl"
       - "--user"
       - "{{ item[0] }}"
       - "{{ item[1] }}"
-  become: true
   become_user: "containerapp"
   environment:
     XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts['getent_passwd']['containerapp'][1] }}"
     DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ ansible_facts['getent_passwd']['containerapp'][1] }}/bus"
-  changed_when: false
-  failed_when: false
+  changed_when:
+    - false
+  failed_when:
+    - false
   loop:
     - - "is-enabled"
       - "usertest-job.timer"
@@ -407,7 +383,6 @@
     - - "is-active"
       - "usertest-job.service"
   register: __testing_quadlet_userunit_state_result
-
 
 - name: "Molecule | Verify | quadlet | Check the plain user unit states (rootless)"
   ansible.builtin.assert:
@@ -421,7 +396,6 @@
       the unmanaged oneshot service inactive):
       {{ __testing_quadlet_userunit_state_result['results'] | ansible.builtin.map(attribute='stdout') | ansible.builtin.list }}
     quiet: true
-
 
 # An administrator's own unit file (no ownership marker): the cleanup and
 # uninstall sweeps below must leave it alone even though it lives in the unit
@@ -441,10 +415,7 @@
       Image=quay.io/libpod/testimage:20241011
     owner: "root"
     group: "root"
-    mode: "u=rw,g=r,o="
-
-
-# Same protection for the shared systemd unit directory: the plain-unit
+    mode: "u=rw,g=r,o=" # 0640; Same protection for the shared systemd unit directory: the plain-unit
 # sweeps only own marker-carrying files and must leave every other unit file
 # (the vast majority in /etc/systemd/system) alone.
 - name: "Molecule | Verify | quadlet | Plant an administrator-owned timer file without the marker"
@@ -457,10 +428,7 @@
       OnCalendar=2099-01-01 03:00:00
     owner: "root"
     group: "root"
-    mode: "u=rw,g=r,o="
-
-
-## Application manifest and cleanup reconciliation (rootful "webtest")
+    mode: "u=rw,g=r,o=" # 0640; Application manifest and cleanup reconciliation (rootful "webtest")
 #
 # The role records secrets, managed files and registry logins in a
 # per-application manifest so renamed or de-listed resources get cleaned up
@@ -469,12 +437,10 @@
 # registry logout reconciliation (offline, via a crafted authfile entry) and
 # finally the complete removal with empty declared lists. The removal test
 # runs last on purpose and leaves the webtest application uninstalled.
-
 - name: "Molecule | Verify | quadlet | Read the webtest application manifest"
   ansible.builtin.slurp:
     src: "/var/lib/ansible-podman-quadlet/system/webtest.ansible-manifest"
   register: __testing_quadlet_manifest_slurp
-
 
 - name: "Molecule | Verify | quadlet | Check the manifest records the converge resources"
   ansible.builtin.assert:
@@ -490,7 +456,6 @@
   vars:
     __testing_quadlet_manifest_content: "{{ __testing_quadlet_manifest_slurp['content'] | ansible.builtin.b64decode }}"
     __testing_quadlet_manifest_parsed: "{{ __testing_quadlet_manifest_content | ansible.builtin.from_yaml }}"
-
 
 - name: "Molecule | Verify | quadlet | Reap: re-run the role with an additional secret and file"
   ansible.builtin.include_role:
@@ -544,7 +509,6 @@
             WantedBy:
               - "multi-user.target"
 
-
 - name: "Molecule | Verify | quadlet | Reap: query the Podman secrets after adding"
   ansible.builtin.command:
     argv:
@@ -553,15 +517,14 @@
       - "ls"
       - "--format"
       - "{{ '{{.Name}}' }}"
+  changed_when:
+    - false
+
   register: __testing_quadlet_reap_added_secrets
-  changed_when: false
-
-
 - name: "Molecule | Verify | quadlet | Reap: read the manifest after adding"
   ansible.builtin.slurp:
     src: "/var/lib/ansible-podman-quadlet/system/webtest.ansible-manifest"
   register: __testing_quadlet_reap_added_manifest
-
 
 - name: "Molecule | Verify | quadlet | Reap: check the additional resources exist and are recorded"
   ansible.builtin.assert:
@@ -594,10 +557,10 @@
       - "--property"
       - "ActiveEnterTimestampMonotonic"
       - "--value"
+  changed_when:
+    - false
+
   register: __testing_quadlet_reap_started_before
-  changed_when: false
-
-
 - name: "Molecule | Verify | quadlet | Reap: re-run the role without the additional resources"
   ansible.builtin.include_role:
     name: "foundata.podman.quadlet"
@@ -645,12 +608,10 @@
             WantedBy:
               - "multi-user.target"
 
-
 # The role notifies its restart handler for the removed file; run it now so
 # the restart can be asserted (handlers otherwise wait for the end of the play).
 - name: "Molecule | Verify | quadlet | Reap: flush the notified handlers"
   ansible.builtin.meta: "flush_handlers"
-
 
 - name: "Molecule | Verify | quadlet | Reap: record the webtest start timestamp after de-listing"
   ansible.builtin.command:
@@ -661,22 +622,20 @@
       - "--property"
       - "ActiveEnterTimestampMonotonic"
       - "--value"
+  changed_when:
+    - false
+
   register: __testing_quadlet_reap_started_after
-  changed_when: false
-
-
 - name: "Molecule | Verify | quadlet | Reap: check the removed file triggered a service restart"
   ansible.builtin.assert:
     that:
-      - (__testing_quadlet_reap_started_after['stdout'] | ansible.builtin.int)
-        > (__testing_quadlet_reap_started_before['stdout'] | ansible.builtin.int)
+      - (__testing_quadlet_reap_started_after['stdout'] | ansible.builtin.int) > (__testing_quadlet_reap_started_before['stdout'] | ansible.builtin.int)
     fail_msg: >-
       Removing a declared file did not restart the application services
       (start timestamp {{ __testing_quadlet_reap_started_before['stdout'] }}
       unchanged) - the container would keep using the dead bind-mount source
       of the removed file until an unrelated restart.
     success_msg: "Removing a declared file restarted the application services."
-
 
 - name: "Molecule | Verify | quadlet | Reap: query the Podman secrets after de-listing"
   ansible.builtin.command:
@@ -686,21 +645,19 @@
       - "ls"
       - "--format"
       - "{{ '{{.Name}}' }}"
+  changed_when:
+    - false
+
   register: __testing_quadlet_reap_removed_secrets
-  changed_when: false
-
-
 - name: "Molecule | Verify | quadlet | Reap: check the temp file is gone"
   ansible.builtin.stat:
     path: "/var/lib/webtest/temp.env"
   register: __testing_quadlet_reap_tempfile_stat
 
-
 - name: "Molecule | Verify | quadlet | Reap: read the manifest after de-listing"
   ansible.builtin.slurp:
     src: "/var/lib/ansible-podman-quadlet/system/webtest.ansible-manifest"
   register: __testing_quadlet_reap_removed_manifest
-
 
 - name: "Molecule | Verify | quadlet | Reap: check the de-listed resources were removed"
   ansible.builtin.assert:
@@ -726,24 +683,24 @@
 - name: "Molecule | Verify | quadlet | Reap: check the de-listed run-once and timer unit files"
   ansible.builtin.stat:
     path: "{{ item }}"
-  register: __testing_quadlet_reap_units_stat
   loop:
     - "/etc/containers/systemd/webtest-init.container"
     - "/etc/containers/systemd/webtest-job.container"
     - "/etc/systemd/system/webtest-job.timer"
     - "/etc/systemd/system/webtest-sock.socket"
 
-
+  register: __testing_quadlet_reap_units_stat
 - name: "Molecule | Verify | quadlet | Reap: query the de-listed timer state"
   ansible.builtin.command:
     argv:
       - "systemctl"
       - "is-active"
       - "webtest-job.timer"
-  changed_when: false
-  failed_when: false
+  changed_when:
+    - false
+  failed_when:
+    - false
   register: __testing_quadlet_reap_timer_state
-
 
 - name: "Molecule | Verify | quadlet | Reap: check the de-listed plain unit was removed and stopped"
   ansible.builtin.assert:
@@ -758,7 +715,6 @@
       behind or timer still active).
     success_msg: "De-listed run-once and timer units were removed and stopped."
 
-
 ## Ownership versus absent declarations
 #
 # Regression: the conflict check intersected only PRESENT entries with the
@@ -772,7 +728,6 @@
 - name: "Molecule | Verify | quadlet | Absent ownership: read the owned file and secret (before)"
   ansible.builtin.command:
     argv: "{{ item }}"
-  register: __testing_quadlet_absown_before
   changed_when:
     - false
   loop:
@@ -783,10 +738,9 @@
       - "inspect"
       - "webtest_secret"
 
-
+  register: __testing_quadlet_absown_before
 - name: "Molecule | Verify | quadlet | Absent ownership: request the foreign file and secret absent (must fail)"
   block:
-
     - name: "Molecule | Verify | quadlet | Absent ownership: include the role with foreign absent declarations"
       ansible.builtin.include_role:
         name: "foundata.podman.quadlet"
@@ -805,7 +759,6 @@
         msg: "state absent removed a file and a secret owned by another application."
 
   rescue:
-
     - name: "Molecule | Verify | quadlet | Absent ownership: assert the run failed in the ownership check"
       ansible.builtin.assert:
         that:
@@ -817,11 +770,9 @@
           {{ ansible_failed_result['msg'] | ansible.builtin.default('(no message)') }}
         success_msg: "Foreign absent declarations are rejected by the ownership check."
 
-
 - name: "Molecule | Verify | quadlet | Absent ownership: read the owned file and secret (after)"
   ansible.builtin.command:
     argv: "{{ item }}"
-  register: __testing_quadlet_absown_after
   changed_when:
     - false
   loop:
@@ -832,12 +783,11 @@
       - "inspect"
       - "webtest_secret"
 
-
+  register: __testing_quadlet_absown_after
 - name: "Molecule | Verify | quadlet | Absent ownership: get information about the rejected application's manifest"
   ansible.builtin.stat:
     path: "/var/lib/ansible-podman-quadlet/system/absenttest.ansible-manifest"
   register: __testing_quadlet_absown_manifest
-
 
 - name: "Molecule | Verify | quadlet | Absent ownership: assert nothing was touched"
   ansible.builtin.assert:
@@ -850,11 +800,9 @@
       left a manifest behind.
     success_msg: "The owned file and secret survived unchanged; no manifest was written for the rejected run."
 
-
 # The same rejection must hold in check mode, without mutating anything.
 - name: "Molecule | Verify | quadlet | Absent ownership: repeat the foreign request in check mode (must fail)"
   block:
-
     - name: "Molecule | Verify | quadlet | Absent ownership: include the role in check mode"
       ansible.builtin.include_role:
         name: "foundata.podman.quadlet"
@@ -872,7 +820,6 @@
         msg: "Check mode did not report the ownership rejection."
 
   rescue:
-
     - name: "Molecule | Verify | quadlet | Absent ownership: assert the check mode run failed in the ownership check"
       ansible.builtin.assert:
         that:
@@ -884,12 +831,10 @@
           {{ ansible_failed_result['msg'] | ansible.builtin.default('(no message)') }}
         success_msg: "Check mode reports the ownership rejection."
 
-
 # Cross-scope: file paths are host-global, so a rootless application must
 # not be able to remove a rootful application's file either.
 - name: "Molecule | Verify | quadlet | Absent ownership: request the rootful file absent from a rootless application (must fail)"
   block:
-
     - name: "Molecule | Verify | quadlet | Absent ownership: include the role rootless with the foreign file"
       ansible.builtin.include_role:
         name: "foundata.podman.quadlet"
@@ -906,7 +851,6 @@
         msg: "A rootless application removed a rootful application's file."
 
   rescue:
-
     - name: "Molecule | Verify | quadlet | Absent ownership: assert the cross-scope rejection"
       ansible.builtin.assert:
         that:
@@ -918,12 +862,10 @@
           {{ ansible_failed_result['msg'] | ansible.builtin.default('(no message)') }}
         success_msg: "File claims hold across scopes; the rootless removal was rejected."
 
-
 # Directory removal takes the tree with it, so it must respect both the
 # directory reference claims and the file claims below the path.
 - name: "Molecule | Verify | quadlet | Absent ownership: request the foreign directory absent (must fail)"
   block:
-
     - name: "Molecule | Verify | quadlet | Absent ownership: include the role with the foreign directory absent"
       ansible.builtin.include_role:
         name: "foundata.podman.quadlet"
@@ -939,7 +881,6 @@
         msg: "state absent recursively removed a directory another application references."
 
   rescue:
-
     - name: "Molecule | Verify | quadlet | Absent ownership: assert the directory rejection"
       ansible.builtin.assert:
         that:
@@ -951,26 +892,22 @@
           {{ ansible_failed_result['msg'] | ansible.builtin.default('(no message)') }}
         success_msg: "Removing a directory another application references is rejected."
 
-
 - name: "Molecule | Verify | quadlet | Absent ownership: assert the foreign directory survived"
   ansible.builtin.stat:
     path: "/var/lib/webtest/app.env"
-  register: __testing_quadlet_absown_dirfile
   failed_when:
     - not (__testing_quadlet_absown_dirfile['stat']['exists'] | ansible.builtin.bool)
 
-
-# An application may always remove its OWN resources, and absence is
-# authoritative for unclaimed pre-existing resources.
+  # An application may always remove its OWN resources, and absence is
+  # authoritative for unclaimed pre-existing resources.
+  register: __testing_quadlet_absown_dirfile
 - name: "Molecule | Verify | quadlet | Absent ownership: plant an unclaimed pre-existing file"
   ansible.builtin.copy:
     dest: "/var/tmp/molecule-unclaimed.env"
     content: "UNCLAIMED=1\n"
     owner: "root"
     group: "root"
-    mode: "u=rw,g=r,o=r"
-
-
+    mode: "u=rw,g=r,o=r" # 0644
 - name: "Molecule | Verify | quadlet | Absent ownership: deploy own resources"
   ansible.builtin.include_role:
     name: "foundata.podman.quadlet"
@@ -983,7 +920,6 @@
     quadlet_podman_secrets:
       - name: "absenttest_secret"
         value: "molecule-absenttest"
-
 
 - name: "Molecule | Verify | quadlet | Absent ownership: remove the own resources and the unclaimed file"
   ansible.builtin.include_role:
@@ -1000,16 +936,14 @@
       - name: "absenttest_secret"
         state: "absent"
 
-
 - name: "Molecule | Verify | quadlet | Absent ownership: get information about the removed resources"
   ansible.builtin.stat:
     path: "{{ item }}"
-  register: __testing_quadlet_absown_removed
   loop:
     - "/var/tmp/molecule-absenttest.env"
     - "/var/tmp/molecule-unclaimed.env"
 
-
+  register: __testing_quadlet_absown_removed
 - name: "Molecule | Verify | quadlet | Absent ownership: query the removed secret"
   ansible.builtin.command:
     argv:
@@ -1017,13 +951,12 @@
       - "secret"
       - "inspect"
       - "absenttest_secret"
-  register: __testing_quadlet_absown_secret
   changed_when:
     - false
   failed_when:
     - __testing_quadlet_absown_secret['rc'] == 0
 
-
+  register: __testing_quadlet_absown_secret
 - name: "Molecule | Verify | quadlet | Absent ownership: assert own and unclaimed removals worked"
   ansible.builtin.assert:
     that:
@@ -1045,7 +978,6 @@
     quadlet_podman_app: "absenttest"
     quadlet_podman_state: "absent"
 
-
 ## Collision with an administrator-owned native unit
 #
 # Regression: a hand-written /etc/systemd/system/<name>.service shadows the
@@ -1066,17 +998,13 @@
     dest: "/etc/systemd/system/collisiontest.service"
     owner: "root"
     group: "root"
-    mode: "u=rw,g=r,o=r"
-
-
+    mode: "u=rw,g=r,o=r" # 0644
 - name: "Molecule | Verify | quadlet | Collision: reload systemd so the decoy is effective"
   ansible.builtin.systemd_service:
     daemon_reload: true
 
-
 - name: "Molecule | Verify | quadlet | Collision: deploy an application colliding with it (must fail)"
   block:
-
     - name: "Molecule | Verify | quadlet | Collision: run the role with the colliding unit name"
       ansible.builtin.include_role:
         name: "foundata.podman.quadlet"
@@ -1100,7 +1028,6 @@
           taken by a native service; it would manage that foreign service.
 
   rescue:
-
     - name: "Molecule | Verify | quadlet | Collision: assert the run failed in the collision check"
       ansible.builtin.assert:
         that:
@@ -1121,12 +1048,11 @@
 - name: "Molecule | Verify | quadlet | Collision: check nothing was deployed for the refused application"
   ansible.builtin.stat:
     path: "{{ item }}"
-  register: __testing_quadlet_collision_leftovers
   loop:
     - "/etc/containers/systemd/collisiontest.container"
     - "/var/lib/ansible-podman-quadlet/system/collisionapp.ansible-manifest"
 
-
+  register: __testing_quadlet_collision_leftovers
 - name: "Molecule | Verify | quadlet | Collision: assert the refusal happened before any change"
   ansible.builtin.assert:
     that:
@@ -1137,17 +1063,14 @@
   loop_control:
     label: "{{ item['item'] }}"
 
-
 - name: "Molecule | Verify | quadlet | Collision: remove the decoy again"
   ansible.builtin.file:
     path: "/etc/systemd/system/collisiontest.service"
     state: "absent"
 
-
 - name: "Molecule | Verify | quadlet | Collision: reload systemd after removing the decoy"
   ansible.builtin.systemd_service:
     daemon_reload: true
-
 
 # The same declaration must be accepted once the foreign unit is gone,
 # otherwise the check would just be a blanket refusal.
@@ -1164,7 +1087,6 @@
           Container:
             Image: "quay.io/libpod/testimage:20241011"
             Exec: "top"
-
 
 - name: "Molecule | Verify | quadlet | Collision: remove the test application again"
   ansible.builtin.include_role:
@@ -1192,25 +1114,21 @@
     dest: "/etc/containers/auth.json"
     owner: "root"
     group: "root"
-    mode: "u=rw,g=,o="
-
-
+    mode: "u=rw,g=,o=" # 0600
 - name: "Molecule | Verify | quadlet | Logout: ensure the per-application authfile directory"
   ansible.builtin.file:
     path: "/var/lib/ansible-podman-quadlet/auth/system"
     state: "directory"
     owner: "root"
     group: "root"
-    mode: "u=rwx,g=,o="
-
-
+    mode: "u=rwx,g=,o=" # 0700
 - name: "Molecule | Verify | quadlet | Logout: craft the per-application authfiles"
   ansible.builtin.copy:
     content: "{{ item['content'] }}"
     dest: "{{ item['dest'] }}"
     owner: "root"
     group: "root"
-    mode: "u=rw,g=,o="
+    mode: "u=rw,g=,o=" # 0600
   loop:
     - dest: "/var/lib/ansible-podman-quadlet/auth/system/webtest.json"
       content: |
@@ -1221,7 +1139,6 @@
         {"auths": {"registry.molecule.invalid": {"auth": "b3RoZXI6b3RoZXI="}}}
   loop_control:
     label: "{{ item['dest'] }}"
-
 
 - name: "Molecule | Verify | quadlet | Logout: record the registry in the manifest"
   ansible.builtin.copy:
@@ -1237,9 +1154,7 @@
     dest: "/var/lib/ansible-podman-quadlet/system/webtest.ansible-manifest"
     owner: "root"
     group: "root"
-    mode: "u=rw,g=r,o="
-
-
+    mode: "u=rw,g=r,o=" # 0640
 - name: "Molecule | Verify | quadlet | Logout: plant a second application's manifest claiming the same registry"
   ansible.builtin.copy:
     content: |
@@ -1252,9 +1167,7 @@
     dest: "/var/lib/ansible-podman-quadlet/system/otherapp.ansible-manifest"
     owner: "root"
     group: "root"
-    mode: "u=rw,g=r,o="
-
-
+    mode: "u=rw,g=r,o=" # 0640
 - name: "Molecule | Verify | quadlet | Logout: re-run the role without registry logins"
   ansible.builtin.include_role:
     name: "foundata.podman.quadlet"
@@ -1302,31 +1215,27 @@
             WantedBy:
               - "multi-user.target"
 
-
 - name: "Molecule | Verify | quadlet | Logout: read the application's authfile"
   ansible.builtin.slurp:
     src: "/var/lib/ansible-podman-quadlet/auth/system/webtest.json"
-  register: __testing_quadlet_logout_authfile
   failed_when:
     # tolerate podman removing the whole file with its last entry
     - __testing_quadlet_logout_authfile['msg'] is ansible.builtin.defined
     - "'file not found' not in (__testing_quadlet_logout_authfile['msg'] | ansible.builtin.lower)"
 
-
+  register: __testing_quadlet_logout_authfile
 - name: "Molecule | Verify | quadlet | Logout: read the second application's authfile and the legacy authfile"
   ansible.builtin.slurp:
     src: "{{ item }}"
-  register: __testing_quadlet_logout_untouched
   loop:
     - "/var/lib/ansible-podman-quadlet/auth/system/otherapp.json"
     - "/etc/containers/auth.json"
 
-
+  register: __testing_quadlet_logout_untouched
 - name: "Molecule | Verify | quadlet | Logout: read the manifest"
   ansible.builtin.slurp:
     src: "/var/lib/ansible-podman-quadlet/system/webtest.ansible-manifest"
   register: __testing_quadlet_logout_manifest
-
 
 - name: "Molecule | Verify | quadlet | Logout: check the de-listed entry left only this application's file"
   ansible.builtin.assert:
@@ -1370,7 +1279,6 @@
     - "/var/lib/ansible-podman-quadlet/auth/system/otherapp.json"
     - "/etc/containers/auth.json"
 
-
 ## Authentication file injection (init-only)
 #
 # The injected environment/label decide which credentials podman uses at
@@ -1403,7 +1311,6 @@
         sections:
           Container:
             Image: "quay.io/libpod/testimage:20241011"
-
 
 - name: "Molecule | Verify | quadlet | Injection: assert the environment and label injection"
   ansible.builtin.assert:
@@ -1439,7 +1346,6 @@
 
 - name: "Molecule | Verify | quadlet | Injection: run init with a user-supplied REGISTRY_AUTH_FILE (must fail)"
   block:
-
     - name: "Molecule | Verify | quadlet | Injection: include the role's init with a conflicting environment entry"
       ansible.builtin.include_role:
         name: "foundata.podman.quadlet"
@@ -1465,7 +1371,6 @@
         msg: "A user-supplied REGISTRY_AUTH_FILE was accepted although quadlet_podman_registry_auth is set."
 
   rescue:
-
     - name: "Molecule | Verify | quadlet | Injection: assert init failed in the authfile conflict check"
       ansible.builtin.assert:
         that:
@@ -1476,7 +1381,6 @@
           The run failed, but not in the authfile conflict check as expected
           (failed task: '{{ ansible_failed_task['name'] | ansible.builtin.default('unknown') }}').
         success_msg: "The conflicting REGISTRY_AUTH_FILE entry was rejected by the role's init."
-
 
 ## Complete removal via the manifest (runs last on purpose)
 #
@@ -1492,7 +1396,6 @@
     quadlet_podman_app: "webtest"
     quadlet_podman_state: "absent"
 
-
 - name: "Molecule | Verify | quadlet | Absent: query the Podman secrets"
   ansible.builtin.command:
     argv:
@@ -1501,10 +1404,10 @@
       - "ls"
       - "--format"
       - "{{ '{{.Name}}' }}"
+  changed_when:
+    - false
+
   register: __testing_quadlet_absent_secrets
-  changed_when: false
-
-
 - name: "Molecule | Verify | quadlet | Absent: query the Podman volumes"
   ansible.builtin.command:
     argv:
@@ -1513,27 +1416,25 @@
       - "ls"
       - "--format"
       - "{{ '{{.Name}}' }}"
+  changed_when:
+    - false
+
   register: __testing_quadlet_absent_volumes
-  changed_when: false
-
-
 - name: "Molecule | Verify | quadlet | Absent: query the ServiceName-overridden service"
   ansible.builtin.command:
     argv:
       - "systemctl"
       - "is-active"
       - "webtest-alias.service"
-  register: __testing_quadlet_absent_alias
   changed_when:
     - false
   failed_when:
     - false
 
-
+  register: __testing_quadlet_absent_alias
 - name: "Molecule | Verify | quadlet | Absent: check the remaining artifacts"
   ansible.builtin.stat:
     path: "{{ item }}"
-  register: __testing_quadlet_absent_stat
   loop:
     - "/etc/containers/systemd/webtest.container"
     - "/etc/containers/systemd/svctest.container"
@@ -1542,7 +1443,7 @@
     - "/var/lib/webtest/app.env"
     - "/var/lib/webtest"
 
-
+  register: __testing_quadlet_absent_stat
 - name: "Molecule | Verify | quadlet | Absent: check the application is fully removed, data kept"
   ansible.builtin.assert:
     that:
@@ -1592,7 +1493,6 @@
             WantedBy:
               - "multi-user.target"
 
-
 - name: "Molecule | Verify | quadlet | Rotation: read the container environment (value 1)"
   ansible.builtin.command:
     argv:
@@ -1600,15 +1500,14 @@
       - "exec"
       - "rotatest"
       - "env"
-  register: __testing_quadlet_rotate_env1
   changed_when:
     - false
 
-
-# Implicit rotation: ONLY the declared value changes; the role has to detect
-# the difference, replace the secret and restart the service so the
-# recreated container sees the new value (regression: existing secrets were
-# never compared, a changed value silently did nothing without force).
+  # Implicit rotation: ONLY the declared value changes; the role has to detect
+  # the difference, replace the secret and restart the service so the
+  # recreated container sees the new value (regression: existing secrets were
+  # never compared, a changed value silently did nothing without force).
+  register: __testing_quadlet_rotate_env1
 - name: "Molecule | Verify | quadlet | Rotation: converge again with a changed secret value"
   ansible.builtin.include_role:
     name: "foundata.podman.quadlet"
@@ -1632,7 +1531,6 @@
             WantedBy:
               - "multi-user.target"
 
-
 - name: "Molecule | Verify | quadlet | Rotation: read the container environment (value 2)"
   ansible.builtin.command:
     argv:
@@ -1640,11 +1538,10 @@
       - "exec"
       - "rotatest"
       - "env"
-  register: __testing_quadlet_rotate_env2
   changed_when:
     - false
 
-
+  register: __testing_quadlet_rotate_env2
 - name: "Molecule | Verify | quadlet | Rotation: assert the rotated value reached the running container"
   ansible.builtin.assert:
     that:
@@ -1658,12 +1555,10 @@
       {{ __testing_quadlet_rotate_env2['stdout_lines'] | ansible.builtin.select('ansible.builtin.match', '^ROTATEST_') | ansible.builtin.list }}).
     success_msg: "Changing the declared value rotated the secret and restarted the service."
 
-
 # Exclusive ownership: a second application claiming rotatest's secret has
 # to be rejected before anything is changed.
 - name: "Molecule | Verify | quadlet | Ownership: attempt to claim the secret from another application"
   block:
-
     - name: "Molecule | Verify | quadlet | Ownership: include the role as a conflicting application"
       ansible.builtin.include_role:
         name: "foundata.podman.quadlet"
@@ -1678,11 +1573,9 @@
         __testing_quadlet_conflict_rejected: false
 
   rescue:
-
     - name: "Molecule | Verify | quadlet | Ownership: record that the conflicting claim was rejected"
       ansible.builtin.set_fact:
         __testing_quadlet_conflict_rejected: true
-
 
 - name: "Molecule | Verify | quadlet | Ownership: read the container environment after the rejected claim"
   ansible.builtin.command:
@@ -1691,11 +1584,10 @@
       - "exec"
       - "rotatest"
       - "env"
-  register: __testing_quadlet_rotate_env3
   changed_when:
     - false
 
-
+  register: __testing_quadlet_rotate_env3
 - name: "Molecule | Verify | quadlet | Ownership: assert the conflicting claim was rejected and nothing changed"
   ansible.builtin.assert:
     that:
@@ -1706,13 +1598,11 @@
       (or the rejected run still modified the secret).
     success_msg: "Conflicting resource claims are rejected before any change."
 
-
 # Unit files and generated services are a scope-wide namespace: a second
 # application claiming rotatest's unit file name must be rejected via the
 # manifest intersection, before anything is written.
 - name: "Molecule | Verify | quadlet | Ownership: attempt to claim the unit name from another application"
   block:
-
     - name: "Molecule | Verify | quadlet | Ownership: include the role with a conflicting unit name"
       ansible.builtin.include_role:
         name: "foundata.podman.quadlet"
@@ -1732,18 +1622,15 @@
         __testing_quadlet_unitconflict_rejected: false
 
   rescue:
-
     - name: "Molecule | Verify | quadlet | Ownership: record that the conflicting unit was rejected"
       ansible.builtin.set_fact:
         __testing_quadlet_unitconflict_rejected: true
-
 
 # An existing UNMARKED file (an administrator's unit of the same name) must
 # be rejected, not overwritten: the admin decoy planted earlier is the
 # fixture.
 - name: "Molecule | Verify | quadlet | Ownership: attempt to overwrite an administrator's unit file"
   block:
-
     - name: "Molecule | Verify | quadlet | Ownership: include the role colliding with the admin decoy"
       ansible.builtin.include_role:
         name: "foundata.podman.quadlet"
@@ -1763,11 +1650,9 @@
         __testing_quadlet_adminfile_rejected: false
 
   rescue:
-
     - name: "Molecule | Verify | quadlet | Ownership: record that the admin file was rejected"
       ansible.builtin.set_fact:
         __testing_quadlet_adminfile_rejected: true
-
 
 # The decoy deliberately QUOTES the ownership marker as a substring (the
 # exact-line marker fixture), so its state is compared by checksum, not by
@@ -1777,11 +1662,9 @@
     path: "/etc/containers/systemd/admin-own-decoy.container"
   register: __testing_quadlet_admindecoy_stat
 
-
 # A present secret without a value would silently become an empty secret.
 - name: "Molecule | Verify | quadlet | Validation: attempt a present secret without a value"
   block:
-
     - name: "Molecule | Verify | quadlet | Validation: include the role with a value-less secret"
       ansible.builtin.include_role:
         name: "foundata.podman.quadlet"
@@ -1795,11 +1678,9 @@
         __testing_quadlet_novalue_rejected: false
 
   rescue:
-
     - name: "Molecule | Verify | quadlet | Validation: record that the value-less secret was rejected"
       ansible.builtin.set_fact:
         __testing_quadlet_novalue_rejected: true
-
 
 - name: "Molecule | Verify | quadlet | Ownership and validation: assert the rejections"
   ansible.builtin.assert:
@@ -1842,7 +1723,6 @@
             Exec: "top"
             ServiceName: "renametest-v1"
 
-
 - name: "Molecule | Verify | quadlet | Rename: redeploy the same file with ServiceName v2"
   ansible.builtin.include_role:
     name: "foundata.podman.quadlet"
@@ -1859,14 +1739,12 @@
             Exec: "top"
             ServiceName: "renametest-v2"
 
-
 - name: "Molecule | Verify | quadlet | Rename: query both service generations"
   ansible.builtin.command:
     argv:
       - "systemctl"
       - "is-active"
       - "{{ item }}"
-  register: __testing_quadlet_rename_state
   changed_when:
     - false
   failed_when:
@@ -1875,7 +1753,7 @@
     - "renametest-v1.service"
     - "renametest-v2.service"
 
-
+  register: __testing_quadlet_rename_state
 - name: "Molecule | Verify | quadlet | Rename: drop the override again (fallback to the derived name)"
   ansible.builtin.include_role:
     name: "foundata.podman.quadlet"
@@ -1891,14 +1769,12 @@
             Image: "quay.io/libpod/testimage:20241011"
             Exec: "top"
 
-
 - name: "Molecule | Verify | quadlet | Rename: query the v2 and derived generations"
   ansible.builtin.command:
     argv:
       - "systemctl"
       - "is-active"
       - "{{ item }}"
-  register: __testing_quadlet_rename_state2
   changed_when:
     - false
   failed_when:
@@ -1907,7 +1783,7 @@
     - "renametest-v2.service"
     - "renameworker.service"
 
-
+  register: __testing_quadlet_rename_state2
 - name: "Molecule | Verify | quadlet | Rename: switch back to an override with service state unmanaged"
   ansible.builtin.include_role:
     name: "foundata.podman.quadlet"
@@ -1924,14 +1800,12 @@
             Exec: "top"
             ServiceName: "renametest-v4"
 
-
 - name: "Molecule | Verify | quadlet | Rename: query the derived and v4 generations"
   ansible.builtin.command:
     argv:
       - "systemctl"
       - "is-active"
       - "{{ item }}"
-  register: __testing_quadlet_rename_state3
   changed_when:
     - false
   failed_when:
@@ -1940,7 +1814,7 @@
     - "renameworker.service"
     - "renametest-v4.service"
 
-
+  register: __testing_quadlet_rename_state3
 - name: "Molecule | Verify | quadlet | Rename: assert every obsolete generation was retired"
   ansible.builtin.assert:
     that:
@@ -1973,7 +1847,6 @@
     path: "/var/lib/ansible-podman-quadlet/system/renametest.ansible-manifest"
     state: "absent"
 
-
 - name: "Molecule | Verify | quadlet | Rename: transition once more without a manifest"
   ansible.builtin.include_role:
     name: "foundata.podman.quadlet"
@@ -1990,14 +1863,12 @@
             Exec: "top"
             ServiceName: "renametest-v5"
 
-
 - name: "Molecule | Verify | quadlet | Rename: query the v4 and v5 generations"
   ansible.builtin.command:
     argv:
       - "systemctl"
       - "is-active"
       - "{{ item }}"
-  register: __testing_quadlet_rename_state4
   changed_when:
     - false
   failed_when:
@@ -2006,7 +1877,7 @@
     - "renametest-v4.service"
     - "renametest-v5.service"
 
-
+  register: __testing_quadlet_rename_state4
 - name: "Molecule | Verify | quadlet | Rename: assert the file-parsed fallback retired the old identity"
   ansible.builtin.assert:
     that:
@@ -2019,14 +1890,12 @@
       {{ __testing_quadlet_rename_state4['results'][1]['stdout'] }}).
     success_msg: "The pre-manifest fallback retires the old identity parsed from the unit file."
 
-
 - name: "Molecule | Verify | quadlet | Rename: remove the renametest application again"
   ansible.builtin.include_role:
     name: "foundata.podman.quadlet"
   vars:
     quadlet_podman_app: "renametest"
     quadlet_podman_state: "absent"
-
 
 # Enablement transition: removing the Install section together with state
 # "running" must remove the old enablement symlink (regression: the
@@ -2045,7 +1914,6 @@
     - true
   failed_when:
     - false
-
 
 - name: "Molecule | Verify | quadlet | Transition: deploy an enabled plain unit with Install"
   ansible.builtin.include_role:
@@ -2066,20 +1934,18 @@
             WantedBy:
               - "multi-user.target"
 
-
 - name: "Molecule | Verify | quadlet | Transition: query the enablement (with Install)"
   ansible.builtin.command:
     argv:
       - "systemctl"
       - "is-enabled"
       - "transtest.service"
-  register: __testing_quadlet_trans_enabled
   changed_when:
     - false
   failed_when:
     - false
 
-
+  register: __testing_quadlet_trans_enabled
 - name: "Molecule | Verify | quadlet | Transition: switch to running without Install"
   ansible.builtin.include_role:
     name: "foundata.podman.quadlet"
@@ -2096,14 +1962,12 @@
             ExecStart: "/bin/true"
             RemainAfterExit: true
 
-
 - name: "Molecule | Verify | quadlet | Transition: query the enablement and activity (without Install)"
   ansible.builtin.command:
     argv:
       - "systemctl"
       - "{{ item }}"
       - "transtest.service"
-  register: __testing_quadlet_trans_after
   changed_when:
     - false
   failed_when:
@@ -2112,7 +1976,7 @@
     - "is-enabled"
     - "is-active"
 
-
+  register: __testing_quadlet_trans_after
 - name: "Molecule | Verify | quadlet | Transition: assert the old enablement symlink is gone"
   ansible.builtin.assert:
     that:
@@ -2136,14 +2000,12 @@
     quadlet_podman_app: "transtest"
     quadlet_podman_state: "absent"
 
-
 - name: "Molecule | Verify | quadlet | Rotation: remove the rotatest application again"
   ansible.builtin.include_role:
     name: "foundata.podman.quadlet"
   vars:
     quadlet_podman_app: "rotatest"
     quadlet_podman_state: "absent"
-
 
 - name: "Molecule | Verify | quadlet | Rotation: query the Podman secrets after removal"
   ansible.builtin.command:
@@ -2153,11 +2015,10 @@
       - "ls"
       - "--format"
       - "{{ '{{.Name}}' }}"
-  register: __testing_quadlet_rotate_secrets_after
   changed_when:
     - false
 
-
+  register: __testing_quadlet_rotate_secrets_after
 - name: "Molecule | Verify | quadlet | Rotation: assert the secret was removed with its application"
   ansible.builtin.assert:
     that:
@@ -2165,13 +2026,11 @@
     fail_msg: "state absent left the rotatest secret behind."
     success_msg: "state absent removed the application's secret."
 
-
 # Pod= has to name the Quadlet FILE (with .pod suffix); a bare pod name
 # passes the generator's grammar check nowhere, so the role must reject it
 # during init, before any state is touched.
 - name: "Molecule | Verify | quadlet | Pod reference: attempt a bare pod name"
   block:
-
     - name: "Molecule | Verify | quadlet | Pod reference: include the role with a bare Pod value"
       ansible.builtin.include_role:
         name: "foundata.podman.quadlet"
@@ -2192,15 +2051,12 @@
         __testing_quadlet_barepod_rejected: false
 
   rescue:
-
     - name: "Molecule | Verify | quadlet | Pod reference: record that the bare name was rejected"
       ansible.builtin.set_fact:
         __testing_quadlet_barepod_rejected: true
 
-
 - name: "Molecule | Verify | quadlet | Pod reference: attempt a path as pod reference"
   block:
-
     - name: "Molecule | Verify | quadlet | Pod reference: include the role with a path Pod value"
       ansible.builtin.include_role:
         name: "foundata.podman.quadlet"
@@ -2221,11 +2077,9 @@
         __testing_quadlet_pathpod_rejected: false
 
   rescue:
-
     - name: "Molecule | Verify | quadlet | Pod reference: record that the path was rejected"
       ansible.builtin.set_fact:
         __testing_quadlet_pathpod_rejected: true
-
 
 - name: "Molecule | Verify | quadlet | Pod reference: assert the invalid pod references were rejected"
   ansible.builtin.assert:
@@ -2239,18 +2093,16 @@
       Quadlet file name with the '.pod' suffix.
     success_msg: "Pod references without the '.pod' file suffix or with path separators are rejected."
 
-
 - name: "Molecule | Verify | quadlet | Check the administrator's unit files survived the sweeps"
   ansible.builtin.stat:
     path: "{{ item }}"
-  register: __testing_quadlet_admin_decoy_stat
   failed_when:
     - not __testing_quadlet_admin_decoy_stat['stat']['exists']
   loop:
     - "/etc/containers/systemd/admin-own-decoy.container"
     - "/etc/systemd/system/admin-own-decoy.timer"
 
-
+  register: __testing_quadlet_admin_decoy_stat
 - name: "Molecule | Verify | quadlet | Remove the administrator-owned test files"
   ansible.builtin.file:
     path: "{{ item }}"
@@ -2258,7 +2110,6 @@
   loop:
     - "/etc/containers/systemd/admin-own-decoy.container"
     - "/etc/systemd/system/admin-own-decoy.timer"
-
 
 ## Complete removal of the rootless application
 
@@ -2270,11 +2121,9 @@
     quadlet_podman_state: "absent"
     quadlet_podman_user: "containerapp"
 
-
 - name: "Molecule | Verify | quadlet | Absent: check the rootless artifacts"
   ansible.builtin.stat:
     path: "{{ item }}"
-  register: __testing_quadlet_absent_rootless_stat
   loop:
     - "/var/lib/podman/containerapp/.config/containers/systemd/usertest.container"
     - "/var/lib/ansible-podman-quadlet/user-containerapp/usertest.ansible-manifest"
@@ -2284,7 +2133,7 @@
     - "/var/lib/podman/containerapp/.config/systemd/user/usertest-job.timer"
     - "/var/lib/podman/containerapp/.config/systemd/user/usertest-job.service"
 
-
+  register: __testing_quadlet_absent_rootless_stat
 - name: "Molecule | Verify | quadlet | Absent: check the rootless application is fully removed"
   ansible.builtin.assert:
     that:
@@ -2297,7 +2146,6 @@
       state "absent" left rootless unit files, plain user units, the manifest
       or a manifest-recorded file behind.
     success_msg: "state \"absent\" removed the rootless application."
-
 
 ## Root-side cleanup with a deleted service account
 #
@@ -2333,7 +2181,6 @@
             WantedBy:
               - "default.target"
 
-
 - name: "Molecule | Verify | quadlet | Account gone: stop the user services and delete the account"
   ansible.builtin.shell:
     cmd: |
@@ -2351,7 +2198,6 @@
   changed_when:
     - true
 
-
 - name: "Molecule | Verify | quadlet | Account gone: run the role with state 'absent'"
   ansible.builtin.include_role:
     name: "foundata.podman.quadlet"
@@ -2360,11 +2206,9 @@
     quadlet_podman_state: "absent"
     quadlet_podman_user: "containerapp"
 
-
 - name: "Molecule | Verify | quadlet | Account gone: check the root-side artifacts"
   ansible.builtin.stat:
     path: "{{ item }}"
-  register: __testing_quadlet_accountgone_stat
   loop:
     - "/var/lib/ansible-podman-quadlet/user-containerapp/usertest.ansible-manifest"
     # unit file inside the preserved home (removable root-side via the unit
@@ -2375,7 +2219,7 @@
     # the preserved home itself must survive (only app resources are removed)
     - "/var/lib/podman/containerapp"
 
-
+  register: __testing_quadlet_accountgone_stat
 - name: "Molecule | Verify | quadlet | Account gone: assert the root-side cleanup worked without the account"
   ansible.builtin.assert:
     that:
@@ -2402,7 +2246,6 @@
     shell: "/bin/bash"
     password: "!"
 
-
 # userdel also dropped the account's subordinate ID assignments; the
 # host-absent checks later expect the converge-time ranges to survive.
 - name: "Molecule | Verify | quadlet | Account gone: restore the subordinate ID ranges of the account"
@@ -2413,7 +2256,6 @@
   loop:
     - "/etc/subuid"
     - "/etc/subgid"
-
 
 ## Complete removal of the host role (runs after the applications are gone:
 ## it removes the Podman packages and reverts the rootless enablement the
@@ -2431,11 +2273,9 @@
         subuid: "20000:20000"
         subgid: "20000:20000"
 
-
 - name: "Molecule | Verify | host absent: check the remaining artifacts"
   ansible.builtin.stat:
     path: "{{ item }}"
-  register: __testing_host_absent_stat
   loop:
     - "/etc/containers/containers.conf.d/50-managed.conf"
     - "/etc/systemd/system/podman-auto-update.timer.d/00-managed.conf"
@@ -2445,19 +2285,17 @@
     - "/var/lib/podman/containerapp/.config/containers/registries.conf"
     - "/usr/bin/podman"
 
-
+  register: __testing_host_absent_stat
 - name: "Molecule | Verify | host absent: query the rootless account and its subordinate IDs"
   ansible.builtin.getent:
     database: "passwd"
     key: "containerapp"
     fail_key: false
 
-
 - name: "Molecule | Verify | host absent: read /etc/subuid"
   ansible.builtin.slurp:
     src: "/etc/subuid"
   register: __testing_host_absent_subuid
-
 
 - name: "Molecule | Verify | host absent: check the role reverted its changes and kept shared account state"
   ansible.builtin.assert:

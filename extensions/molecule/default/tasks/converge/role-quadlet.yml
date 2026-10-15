@@ -1,3 +1,4 @@
+---
 # Execute the collection role "quadlet" against all driver-created instances:
 # one rootful application ("webtest") and one rootless application ("usertest",
 # running as the account created in role-host.yml).
@@ -105,8 +106,8 @@
             Image: "quay.io/libpod/testimage:20241011"
             Exec: "true"
           Service:
-            Restart: ~
-          Install: ~
+            Restart:
+          Install:
     quadlet_podman_systemd_units:
       - name: "webtest-job.timer"
         sections:
@@ -134,7 +135,6 @@
           Install:
             WantedBy:
               - "sockets.target"
-
 
 # The molecule instances are virtual machines, so the rootless START is
 # testable on every platform (in nested container based testing environments,
