@@ -5,7 +5,8 @@ SPDX-FileCopyrightText: foundata GmbH <https://foundata.com>
 SPDX-License-Identifier: GPL-3.0-or-later
 -->
 
-The `foundata.podman.quadlet` Ansible role (part of the `foundata.podman` Ansible collection).
+The `foundata.podman.quadlet` Ansible role (part of the `foundata.podman`
+Ansible collection).
 
 
 
@@ -69,7 +70,8 @@ The `foundata.podman.quadlet` Ansible role (part of the `foundata.podman` Ansibl
 
 ## Example playbooks, using this role<a id="examples"></a>
 
-One role invocation manages one application: a coherent set of Quadlet units (plus secrets, directories and files). Deploying a rootful application:
+One role invocation manages one application: a coherent set of Quadlet units
+(plus secrets, directories and files). Deploying a rootful application:
 
 ```yaml
 ---
@@ -131,7 +133,9 @@ One role invocation manages one application: a coherent set of Quadlet units (pl
                 AutoUpdate: "registry"
 ```
 
-The same application deployed rootless is a one-line change; the account must exist and be enabled for rootless Podman usage beforehand (see `host_podman_rootless_users` of the `foundata.podman.host` role):
+The same application deployed rootless is a one-line change; the account must
+exist and be enabled for rootless Podman usage beforehand (see
+`host_podman_rootless_users` of the `foundata.podman.host` role):
 
 ```yaml
       vars:
@@ -140,7 +144,8 @@ The same application deployed rootless is a one-line change; the account must ex
         # [...]
 ```
 
-Removing an application (stops the services, removes units, secrets and managed files; host directories and named volumes are kept to protect persistent data):
+Removing an application (stops the services, removes units, secrets and managed
+files; host directories and named volumes are kept to protect persistent data):
 
 ```yaml
 ---
@@ -162,9 +167,17 @@ Removing an application (stops the services, removes units, secrets and managed 
 
 ## Run-once containers and timers<a id="run-once"></a>
 
-Containers that run a job and exit (initialization, migrations, backups) need different handling than daemons. A run-once service ends up `inactive (dead)` after success, so a naive "ensure started" would re-run the job on every Ansible run and permanently report `changed`. The role supports the two common shapes; do not mix them up, they are mutually exclusive:
+Containers that run a job and exit (initialization, migrations, backups) need
+different handling than daemons. A run-once service ends up `inactive (dead)`
+after success, so a naive "ensure started" would re-run the job on every Ansible
+run and permanently report `changed`. The role supports the two common shapes;
+do not mix them up, they are mutually exclusive:
 
-**Run once per deployment and configuration change** (e.g. database migrations): keep the unit managed and set `RemainAfterExit` in its `Service` section. The service parks in `active (exited)` after success, so later runs are a no-op (`changed=0`), while the restart-on-change handler still re-runs the job whenever the application's units or managed files change.
+**Run once per deployment and configuration change** (e.g. database migrations):
+keep the unit managed and set `RemainAfterExit` in its `Service` section. The
+service parks in `active (exited)` after success, so later runs are a no-op
+(`changed=0`), while the restart-on-change handler still re-runs the job
+whenever the application's units or managed files change.
 
 ```yaml
 quadlet_podman_units:
@@ -183,7 +196,17 @@ quadlet_podman_units:
           - "multi-user.target"
 ```
 
-**Run on a schedule** (e.g. backups): set the unit's `service_state` to `unmanaged` so the role only deploys the file (it neither starts the job on converge nor stops an in-flight run), and ship the timer as a plain systemd unit of the same application via `quadlet_podman_systemd_units`. Do NOT use `RemainAfterExit` here: systemd does not re-trigger a unit that is still active, so the timer would fire into a no-op. Keep an `Install` section on the container if the job should additionally run once per boot, or set `Install: ~` to drop one inherited from `quadlet_podman_unit_defaults`. If the job container is a pod member, also set `StartWithPod: false` in its `Container` section: the generated pod service pulls its members in via `Wants=`, so without it the job runs at every pod (re)start no matter what `service_state` and `Install` say.
+**Run on a schedule** (e.g. backups): set the unit's `service_state` to
+`unmanaged` so the role only deploys the file (it neither starts the job on
+converge nor stops an in-flight run), and ship the timer as a plain systemd unit
+of the same application via `quadlet_podman_systemd_units`. Do NOT use
+`RemainAfterExit` here: systemd does not re-trigger a unit that is still active,
+so the timer would fire into a no-op. Keep an `Install` section on the container
+if the job should additionally run once per boot, or set `Install: ~` to drop
+one inherited from `quadlet_podman_unit_defaults`. If the job container is a pod
+member, also set `StartWithPod: false` in its `Container` section: the generated
+pod service pulls its members in via `Wants=`, so without it the job runs at
+every pod (re)start no matter what `service_state` and `Install` say.
 
 ```yaml
 quadlet_podman_units:
@@ -213,23 +236,49 @@ quadlet_podman_systemd_units:
           - "timers.target"
 ```
 
-Plain units from `quadlet_podman_systemd_units` are managed like the application's Quadlet files (ownership marker, cleanup of de-listed units, removal on `quadlet_podman_state: "absent"`) and support real `systemctl enable`/`disable`. They also cover non-container helpers, e.g. a oneshot `.service` wrapping a host-side script plus its `.timer`.
+Plain units from `quadlet_podman_systemd_units` are managed like the
+application's Quadlet files (ownership marker, cleanup of de-listed units,
+removal on `quadlet_podman_state: "absent"`) and support real
+`systemctl enable`/`disable`. They also cover non-container helpers, e.g. a
+oneshot `.service` wrapping a host-side script plus its `.timer`.
 
 
 
 ## Rootless applications: data, UID mapping and SELinux<a id="rootless-notes"></a>
 
-**Prefer named volumes for persistent data.** For rootless applications, named volumes (`.volume` units) live below the account's home directory and Podman handles the user namespace ownership for you. Combined with a central home directory (e.g. `/var/lib/podman/<application>`, see the `foundata.podman.host` role's README section on centralizing rootless storage), all persistent data stays in one predictable tree.
+**Prefer named volumes for persistent data.** For rootless applications, named
+volumes (`.volume` units) live below the account's home directory and Podman
+handles the user namespace ownership for you. Combined with a central home
+directory (e.g. `/var/lib/podman/<application>`, see the `foundata.podman.host`
+role's README section on centralizing rootless storage), all persistent data
+stays in one predictable tree.
 
-**Bind mounts need UID mapping awareness.** A rootless container's UIDs are mapped to the account's subordinate ID range on the host: a process running as UID 999 *inside* the container writes files owned by `<subuid start> + 999` *on the host*. A bind-mounted host directory created via `quadlet_podman_directories` is owned by the account itself, which the container may not be able to write to. Options, in order of preference:
+**Bind mounts need UID mapping awareness.** A rootless container's UIDs are
+mapped to the account's subordinate ID range on the host: a process running as
+UID 999 *inside* the container writes files owned by `<subuid start> + 999`
+*on the host*. A bind-mounted host directory created via
+`quadlet_podman_directories` is owned by the account itself, which the container
+may not be able to write to. Options, in order of preference:
 
 - Use a named volume instead (no mapping issues).
-- Add the `:U` volume option (`Volume: "/var/lib/podman/exampleapp/data:/data:U"`) so Podman chowns the content to the container user on start.
-- Pre-create the content with the mapped owner (e.g. via `podman unshare chown` or by computing `<subuid start> + <container UID>`).
+- Add the `:U` volume option
+  (`Volume: "/var/lib/podman/exampleapp/data:/data:U"`) so Podman chowns the
+  content to the container user on start.
+- Pre-create the content with the mapped owner (e.g. via `podman unshare chown`
+  or by computing `<subuid start> + <container UID>`).
 
-**SELinux labels on bind mounts.** On SELinux platforms (RedHat family, openSUSE Leap 16), bind-mounted paths usually need the `:z` (shared between containers) or `:Z` (private to one container) volume option so Podman relabels the content. Use `:Z` only for paths dedicated to a single container - it makes the content inaccessible to others. Never bind-mount system paths with `:z`/`:Z` (the relabeling is applied to the host content).
+**SELinux labels on bind mounts.** On SELinux platforms (RedHat family, openSUSE
+Leap 16), bind-mounted paths usually need the `:z` (shared between containers)
+or `:Z` (private to one container) volume option so Podman relabels the content.
+Use `:Z` only for paths dedicated to a single container - it makes the content
+inaccessible to others. Never bind-mount system paths with `:z`/`:Z` (the
+relabeling is applied to the host content).
 
-**Rotated secrets need container recreation.** Secrets injected as environment variables (`type=env`) are set at container *creation*. After rotating a secret (item `force: true` in `quadlet_podman_secrets`), restart is not enough; the container must be recreated (e.g. `podman rm --force <name>` followed by a service start, or a host reboot).
+**Rotated secrets need container recreation.** Secrets injected as environment
+variables (`type=env`) are set at container *creation*. After rotating a secret
+(item `force: true` in `quadlet_podman_secrets`), restart is not enough; the
+container must be recreated (e.g. `podman rm --force <name>` followed by a
+service start, or a host reboot).
 
 
 
@@ -237,13 +286,18 @@ Plain units from `quadlet_podman_systemd_units` are managed like the application
 
 It might be useful and faster to only call parts of the role by using tags:
 
-- `quadlet_podman_setup`: Manage basic resources, such as packages or service users.
-- `quadlet_podman_config`: Manage settings, such as adapting or creating configuration files.
-- `quadlet_podman_service`: Manage services and daemons, such as running states and service boot configurations.
+- `quadlet_podman_setup`: Manage basic resources, such as packages or service
+  users.
+- `quadlet_podman_config`: Manage settings, such as adapting or creating
+  configuration files.
+- `quadlet_podman_service`: Manage services and daemons, such as running states
+  and service boot configurations.
 
-There are also tags that are generally not intended to be called directly but are included for completeness and to cover edge cases:
+There are also tags that are generally not intended to be called directly but
+are included for completeness and to cover edge cases:
 
-- `quadlet_podman_always`, `always`: Tasks needed by the role itself for internal role setup and the Ansible environment.
+- `quadlet_podman_always`, `always`: Tasks needed by the role itself for
+  internal role setup and the Ansible environment.
 
 
 <!-- ANSIBLE DOCSMITH MAIN START -->
@@ -1199,7 +1253,8 @@ See `dependencies` in [`meta/main.yml`](./meta/main.yml).
 
 ## Compatibility<a id="compatibility"></a>
 
-See `min_ansible_version` in [`meta/main.yml`](./meta/main.yml) and `__quadlet_podman_supported_platforms` in [`vars/main.yml`](./vars/main.yml).
+See `min_ansible_version` in [`meta/main.yml`](./meta/main.yml) and
+`__quadlet_podman_supported_platforms` in [`vars/main.yml`](./vars/main.yml).
 
 
 

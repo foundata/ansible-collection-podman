@@ -5,7 +5,8 @@ SPDX-FileCopyrightText: foundata GmbH <https://foundata.com>
 SPDX-License-Identifier: GPL-3.0-or-later
 -->
 
-The `foundata.podman.host` Ansible role (part of the `foundata.podman` Ansible collection).
+The `foundata.podman.host` Ansible role (part of the `foundata.podman` Ansible
+collection).
 
 
 
@@ -63,7 +64,9 @@ Installation with automatic upgrade:
         host_podman_autoupgrade: true
 ```
 
-Rootless enablement for a service account (create the account first, e.g. with the `foundata.linux.user` role; deploy applications afterwards with the `foundata.podman.quadlet` role):
+Rootless enablement for a service account (create the account first, e.g. with
+the `foundata.linux.user` role; deploy applications afterwards with the
+`foundata.podman.quadlet` role):
 
 ```yaml
 ---
@@ -104,9 +107,23 @@ Uninstall:
 
 ## Centralizing rootless storage<a id="rootless-storage"></a>
 
-By default, this collection does not influence where Podman stores its data at all: rootful storage lives below `/var/lib/containers`, and each rootless user's data lives below their home directory (`~/.local/share/containers` for images, container layers, **named volumes** — the precious application data —, secrets and networks; `~/.config/containers` for Quadlet units and configuration). If you want the persistent data of rootless applications in a central, predictable place instead of scattered across home directories, there are three independent, optional levers (ordered by recommendation):
+By default, this collection does not influence where Podman stores its data at
+all: rootful storage lives below `/var/lib/containers`, and each rootless user's
+data lives below their home directory (`~/.local/share/containers` for images,
+container layers, **named volumes** — the precious application data —, secrets
+and networks; `~/.config/containers` for Quadlet units and configuration). If
+you want the persistent data of rootless applications in a central, predictable
+place instead of scattered across home directories, there are three independent,
+optional levers (ordered by recommendation):
 
-**1. Central home directories for the service accounts (recommended, zero configuration).** Both trees hang off `$HOME`, so an account whose home is e.g. `/var/lib/podman/<application>` keeps units, configuration *and* all storage in one self-contained directory — nothing else needs to be configured. Do NOT place such homes below `/var/lib/containers` (that path carries the SELinux label of the *rootful* storage and relabeling would clobber the rootless labels); use a sibling tree like `/var/lib/podman` and list it in `host_podman_selinux_label_paths`:
+**1. Central home directories for the service accounts (recommended, zero
+configuration).** Both trees hang off `$HOME`, so an account whose home is e.g.
+`/var/lib/podman/<application>` keeps units, configuration *and* all storage in
+one self-contained directory — nothing else needs to be configured. Do NOT place
+such homes below `/var/lib/containers` (that path carries the SELinux label of
+the *rootful* storage and relabeling would clobber the rootless labels); use a
+sibling tree like `/var/lib/podman` and list it in
+`host_podman_selinux_label_paths`:
 
 ```yaml
 ---
@@ -138,7 +155,12 @@ By default, this collection does not influence where Podman stores its data at a
           - "/var/lib/podman"
 ```
 
-**2. Relocate only the storage tree via `rootless_storage_path` (optional flatten).** This system-wide `storage.conf` setting moves every rootless user's *storage* (images, volumes, secrets — not units or configuration, which stay in `~/.config`) to a templated path. Combined with lever 1 it merely flattens the `~/.local/share/containers/storage` nesting; on its own it centralizes storage while homes stay wherever they are:
+**2. Relocate only the storage tree via `rootless_storage_path` (optional
+flatten).** This system-wide `storage.conf` setting moves every rootless user's
+*storage* (images, volumes, secrets — not units or configuration, which stay in
+`~/.config`) to a templated path. Combined with lever 1 it merely flattens the
+`~/.local/share/containers/storage` nesting; on its own it centralizes storage
+while homes stay wherever they are:
 
 ```yaml
     - name: "Trigger invocation of the foundata.podman.host role"
@@ -150,7 +172,14 @@ By default, this collection does not influence where Podman stores its data at a
             rootless_storage_path: "$HOME/storage" # $HOME and $USER get expanded by Podman
 ```
 
-**3. Relocate the configuration tree via `XDG_CONFIG_HOME` (possible, but discouraged).** Moving Quadlet units and configuration out of `~/.config` requires the environment variable to be visible to the user's *systemd instance* as well (e.g. via `~/.config/environment.d/`), otherwise the Quadlet generator keeps looking in the default location and the units are silently ignored — and every interactive `podman`/`systemctl --user` invocation needs it too. The `.config` dot-directory is already central when using lever 1; leave it alone unless you have a hard requirement.
+**3. Relocate the configuration tree via `XDG_CONFIG_HOME` (possible, but
+discouraged).** Moving Quadlet units and configuration out of `~/.config`
+requires the environment variable to be visible to the user's *systemd instance*
+as well (e.g. via `~/.config/environment.d/`), otherwise the Quadlet generator
+keeps looking in the default location and the units are silently ignored — and
+every interactive `podman`/`systemctl --user` invocation needs it too. The
+`.config` dot-directory is already central when using lever 1; leave it alone
+unless you have a hard requirement.
 
 
 
@@ -158,13 +187,18 @@ By default, this collection does not influence where Podman stores its data at a
 
 It might be useful and faster to only call parts of the role by using tags:
 
-- `host_podman_setup`: Manage basic resources, such as packages or service users.
-- `host_podman_config`: Manage settings, such as adapting or creating configuration files.
-- `host_podman_service`: Manage services and daemons, such as running states and service boot configurations.
+- `host_podman_setup`: Manage basic resources, such as packages or service
+  users.
+- `host_podman_config`: Manage settings, such as adapting or creating
+  configuration files.
+- `host_podman_service`: Manage services and daemons, such as running states and
+  service boot configurations.
 
-There are also tags that are generally not intended to be called directly but are included for completeness and to cover edge cases:
+There are also tags that are generally not intended to be called directly but
+are included for completeness and to cover edge cases:
 
-- `host_podman_always`, `always`: Tasks needed by the role itself for internal role setup and the Ansible environment.
+- `host_podman_always`, `always`: Tasks needed by the role itself for internal
+  role setup and the Ansible environment.
 
 
 <!-- ANSIBLE DOCSMITH MAIN START -->
@@ -800,7 +834,8 @@ See `dependencies` in [`meta/main.yml`](./meta/main.yml).
 
 ## Compatibility<a id="compatibility"></a>
 
-See `min_ansible_version` in [`meta/main.yml`](./meta/main.yml) and `__host_podman_supported_platforms` in [`vars/main.yml`](./vars/main.yml).
+See `min_ansible_version` in [`meta/main.yml`](./meta/main.yml) and
+`__host_podman_supported_platforms` in [`vars/main.yml`](./vars/main.yml).
 
 
 
