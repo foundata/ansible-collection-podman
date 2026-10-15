@@ -14,10 +14,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
     for the cleanup logic - do not change its format)
 -#}
 {{ tpl_file_marker }}
-# {{ ansible_managed }}
+# {{ tpl_managed }}
 {{ render_quadlet_unit(
      tpl_unit['sections'],
      tpl_unit['main_section'],
      tpl_service_map,
-     __quadlet_podman_dependency_keys
+     tpl_dependency_keys
    ) }}

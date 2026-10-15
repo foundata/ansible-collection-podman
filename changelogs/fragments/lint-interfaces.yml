@@ -1,0 +1,17 @@
+---
+minor_changes:
+  - >-
+    Add role-prefixed handler topics and use them for internal notifications.
+    Retain the previous topics as migration aliases until version 2.0.0.
+  - >-
+    Add the handler topic host_podman_reload_systemd_daemon
+    as the replacement for "host_podman: systemd daemon-reload".
+  - >-
+    Add the handler topic quadlet_podman_reload_systemd_daemon
+    as the replacement for "quadlet_podman: systemd daemon-reload".
+  - >-
+    Add the handler topic quadlet_podman_restart_application_services
+    as the replacement for "quadlet_podman: restart application services".
+  - >-
+    Add the handler topic quadlet_podman_restart_application_systemd_units
+    as the replacement for "quadlet_podman: restart application systemd units".

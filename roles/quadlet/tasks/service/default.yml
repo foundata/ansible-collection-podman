@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 ---
-
 # The services managed here are the systemd units the Quadlet generator
 # creates from the application's unit files, plus the plain systemd units of
 # the application (quadlet_podman_systemd_units). The workload types
@@ -26,13 +25,12 @@
 - name: "Service | Default | Apply pending systemd changes before managing the services"
   ansible.builtin.meta: "flush_handlers"
 
-
 - name: "Service | Default | Start the services of the application"
+  become: true
   ansible.builtin.systemd_service:
     name: "{{ __quadlet_podman_service_item }}"
     state: "started"
     scope: "{{ __quadlet_podman_systemd_scope }}"
-  become: true
   become_user: "{{ __quadlet_podman_become_user }}"
   environment: "{{ __quadlet_podman_task_environment }}"
   when:
@@ -42,13 +40,12 @@
     loop_var: "__quadlet_podman_service_item"
     label: "{{ __quadlet_podman_service_item }}"
 
-
 - name: "Service | Default | Stop the services of the application (service state is disabled)"
+  become: true
   ansible.builtin.systemd_service:
     name: "{{ __quadlet_podman_service_item }}"
     state: "stopped"
     scope: "{{ __quadlet_podman_systemd_scope }}"
-  become: true
   become_user: "{{ __quadlet_podman_become_user }}"
   environment: "{{ __quadlet_podman_task_environment }}"
   when:
@@ -57,7 +54,6 @@
   loop_control:
     loop_var: "__quadlet_podman_service_item"
     label: "{{ __quadlet_podman_service_item }}"
-
 
 # Unlike Quadlet-generated services, plain unit files support systemctl
 # enable/disable, with explicit semantics: "enabled" enables the unit (an
@@ -68,6 +64,7 @@
 # purpose: the CURRENT file may carry no [Install] anymore, where the
 # systemd_service module would fail instead of removing the old symlink.
 - name: "Service | Default | Disable the plain systemd units of the application (state running or disabled)"
+  become: true
   ansible.builtin.command:
     argv: >-
       {{
@@ -75,41 +72,39 @@
         + (['--user'] if (__quadlet_podman_rootless | ansible.builtin.bool) else [])
         + ['disable', __quadlet_podman_systemd_unit_item['name']]
       }}
-  become: true
   become_user: "{{ __quadlet_podman_become_user }}"
   environment: "{{ __quadlet_podman_task_environment }}"
-  register: __quadlet_podman_systemd_disable_result
-  changed_when:
-    - "'Removed' in (__quadlet_podman_systemd_disable_result['stderr'] | ansible.builtin.default(''))"
-  # tolerate units without installation configuration
-  failed_when: false
   when:
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
     - __quadlet_podman_systemd_unit_item['service_state'] in ['running', 'disabled']
+  changed_when:
+    - "'Removed' in (__quadlet_podman_systemd_disable_result['stderr'] | ansible.builtin.default(''))"
+  # tolerate units without installation configuration
+  failed_when:
+    - false
   loop: "{{ __quadlet_podman_systemd_units_manage }}"
   loop_control:
     loop_var: "__quadlet_podman_systemd_unit_item"
     label: "{{ __quadlet_podman_systemd_unit_item['name'] }}"
 
-
+  register: __quadlet_podman_systemd_disable_result
 - name: "Service | Default | Manage the plain systemd units of the application"
+  become: true
   ansible.builtin.systemd_service:
     name: "{{ __quadlet_podman_systemd_unit_item['name'] }}"
     state: "{{ 'started' if __quadlet_podman_systemd_unit_state in ['enabled', 'running'] else 'stopped' }}"
     enabled: "{{ true if (__quadlet_podman_systemd_unit_state == 'enabled') else omit }}"
     scope: "{{ __quadlet_podman_systemd_scope }}"
-  become: true
   become_user: "{{ __quadlet_podman_become_user }}"
-  environment: "{{ __quadlet_podman_task_environment }}"
   vars:
     __quadlet_podman_systemd_unit_state: "{{ __quadlet_podman_systemd_unit_item['service_state'] }}"
+  environment: "{{ __quadlet_podman_task_environment }}"
   when:
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
   loop: "{{ __quadlet_podman_systemd_units_manage }}"
   loop_control:
     loop_var: "__quadlet_podman_systemd_unit_item"
     label: "{{ __quadlet_podman_systemd_unit_item['name'] }}"
-
 
 - name: "Service | Default | Warn about unsupported service manager"
   ansible.builtin.debug:
@@ -117,6 +112,7 @@
       Quadlet units are a systemd mechanism. The current service manager
       '{{ ansible_facts['service_mgr'] }}' is not supported; the unit files were
       written but no services get managed.
+    verbosity: 0
   when:
     - quadlet_podman_service_state != 'unmanaged'
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) != 'systemd'

@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 ---
-
 # "Distribution is supported" does not guarantee a new-enough Podman (pinned
 # or third-party repositories), so check the actually installed version. The
 # binary can be legitimately absent in check mode (the install phase gets
@@ -15,21 +14,20 @@
     path: "{{ __host_podman_podman_exec_path }}"
   register: __host_podman_exec_stat
 
-
 - name: "Config | Default | Determine the installed Podman version"
   ansible.builtin.command:
     argv:
       - "{{ __host_podman_podman_exec_path }}"
       - "--version"
-  register: __host_podman_version_result
-  changed_when: false
-  # The probe is read-only; run it under "--check" too, otherwise it is
-  # skipped and the next task fails on the missing stdout.
-  check_mode: false
   when:
     - __host_podman_exec_stat['stat']['exists']
 
-
+  changed_when:
+    - false
+  # The probe is read-only; run it under "--check" too, otherwise it is
+  # skipped and the next task fails on the missing stdout.
+  check_mode: false
+  register: __host_podman_version_result
 - name: "Config | Default | Store the installed Podman version as fact"
   ansible.builtin.set_fact:
     __host_podman_version: >-
@@ -39,7 +37,6 @@
       }}
   when:
     - __host_podman_exec_stat['stat']['exists']
-
 
 - name: "Config | Default | Check Podman version requirement and fail if unmet"
   ansible.builtin.fail:
@@ -51,7 +48,6 @@
   when:
     - __host_podman_exec_stat['stat']['exists']
     - __host_podman_version is ansible.builtin.version(__host_podman_min_podman_version, '<')
-
 
 ### Engine configuration files (strictly opt-in, see vars/main.yml)
 
@@ -65,7 +61,6 @@
   when:
     - (__host_podman_containers_effective | ansible.builtin.length) > 0
 
-
 - name: "Config | Default | Create containers.conf drop-in"
   ansible.builtin.template:
     src: "containers.conf.j2"
@@ -78,9 +73,9 @@
     # Pass (and/or adjust) variables needed for the template
     tpl_containers_settings: "{{ __host_podman_containers_effective }}"
     tpl_file_marker: "{{ __host_podman_file_marker }}"
+    tpl_managed: "{{ ansible_managed }}"
   when:
     - (__host_podman_containers_effective | ansible.builtin.length) > 0
-
 
 - name: "Config | Default | Remove containers.conf drop-in (no settings supplied)"
   ansible.builtin.file:
@@ -88,7 +83,6 @@
     state: "absent"
   when:
     - (__host_podman_containers_effective | ansible.builtin.length) == 0
-
 
 - name: "Config | Default | Ensure registries.conf drop-in directory exists"
   ansible.builtin.file:
@@ -99,7 +93,6 @@
     mode: "{{ __host_podman_config_dir_mode }}"
   when:
     - (__host_podman_registries_effective | ansible.builtin.length) > 0
-
 
 - name: "Config | Default | Create registries.conf drop-in"
   ansible.builtin.template:
@@ -113,9 +106,9 @@
     # Pass (and/or adjust) variables needed for the template
     tpl_registries_settings: "{{ __host_podman_registries_effective }}"
     tpl_file_marker: "{{ __host_podman_file_marker }}"
+    tpl_managed: "{{ ansible_managed }}"
   when:
     - (__host_podman_registries_effective | ansible.builtin.length) > 0
-
 
 - name: "Config | Default | Remove registries.conf drop-in (no settings supplied)"
   ansible.builtin.file:
@@ -123,7 +116,6 @@
     state: "absent"
   when:
     - (__host_podman_registries_effective | ansible.builtin.length) == 0
-
 
 # No drop-in mechanism exists for storage.conf and policy.json, so supplying
 # settings replaces the whole distribution file. The pre-role original is
@@ -139,21 +131,20 @@
       - "-s" # no error messages about nonexistent files
       - "{{ __host_podman_file_marker }}"
       - "{{ __host_podman_storage_file_path }}"
-  register: __host_podman_storage_managed_result
-  changed_when: false
+  changed_when:
+    - false
   failed_when:
     - __host_podman_storage_managed_result['rc'] not in [0, 1, 2]
 
-
-# Result indexes: 0 = storage.conf, 1 = its saved original,
-# 2 = policy.json, 3 = its saved original.
+  # Result indexes: 0 = storage.conf, 1 = its saved original,
+  # 2 = policy.json, 3 = its saved original.
+  register: __host_podman_storage_managed_result
 - name: "Config | Default | Check for storage.conf, policy.json and their saved originals"
   ansible.builtin.stat:
     path: "{{ __host_podman_config_path_item }}"
     get_checksum: false
     get_mime: false
     get_attributes: false
-  register: __host_podman_transition_stat
   loop:
     - "{{ __host_podman_storage_file_path }}"
     - "{{ __host_podman_storage_backup_file_path }}"
@@ -163,24 +154,23 @@
     loop_var: "__host_podman_config_path_item"
     label: "{{ __host_podman_config_path_item }}"
 
-
-# Save the distribution original exactly once: only a file that is not yet
-# role-managed (no marker) gets saved, so later runs never overwrite the
-# original with role-rendered content.
+  # Save the distribution original exactly once: only a file that is not yet
+  # role-managed (no marker) gets saved, so later runs never overwrite the
+  # original with role-rendered content.
+  register: __host_podman_transition_stat
 - name: "Config | Default | Save the pre-role storage.conf before the first overwrite"
   ansible.builtin.copy:
     src: "{{ __host_podman_storage_file_path }}"
     dest: "{{ __host_podman_storage_backup_file_path }}"
-    remote_src: true
-    mode: "preserve"
     owner: "{{ __host_podman_config_file_owner }}"
     group: "{{ __host_podman_config_file_group }}"
+    mode: "preserve"  # noqa: foundata-file-mode
+    remote_src: true
   when:
     - (host_podman_storage | ansible.builtin.length) > 0
     - __host_podman_transition_stat['results'][0]['stat']['exists']
     - __host_podman_storage_managed_result['rc'] != 0
     - not __host_podman_transition_stat['results'][1]['stat']['exists']
-
 
 - name: "Config | Default | Create storage.conf"
   ansible.builtin.template:
@@ -194,21 +184,20 @@
     # Pass (and/or adjust) variables needed for the template
     tpl_storage_settings: "{{ __host_podman_storage_effective }}"
     tpl_file_marker: "{{ __host_podman_file_marker }}"
+    tpl_managed: "{{ ansible_managed }}"
   when:
     - (host_podman_storage | ansible.builtin.length) > 0
-
 
 - name: "Config | Default | Restore the pre-role storage.conf (settings cleared)"
   ansible.builtin.copy:
     src: "{{ __host_podman_storage_backup_file_path }}"
     dest: "{{ __host_podman_storage_file_path }}"
+    mode: "preserve"  # noqa: foundata-file-mode
     remote_src: true
-    mode: "preserve"
   when:
     - (host_podman_storage | ansible.builtin.length) == 0
     - __host_podman_storage_managed_result['rc'] == 0
     - __host_podman_transition_stat['results'][1]['stat']['exists']
-
 
 # Without a saved original the removal restores the pre-role behavior:
 # Podman's built-in defaults match the role's base values (see vars/main.yml).
@@ -221,14 +210,12 @@
     - __host_podman_storage_managed_result['rc'] == 0
     - not __host_podman_transition_stat['results'][1]['stat']['exists']
 
-
 - name: "Config | Default | Remove the saved storage.conf original (settings cleared)"
   ansible.builtin.file:
     path: "{{ __host_podman_storage_backup_file_path }}"
     state: "absent"
   when:
     - (host_podman_storage | ansible.builtin.length) == 0
-
 
 # policy.json cannot carry a marker comment (strict JSON), so the saved
 # original doubles as the role-management indicator: it exists exactly while
@@ -240,15 +227,14 @@
   ansible.builtin.copy:
     src: "{{ __host_podman_policy_file_path }}"
     dest: "{{ __host_podman_policy_backup_file_path }}"
-    remote_src: true
-    mode: "preserve"
     owner: "{{ __host_podman_config_file_owner }}"
     group: "{{ __host_podman_config_file_group }}"
+    mode: "preserve"  # noqa: foundata-file-mode
+    remote_src: true
   when:
     - (host_podman_policy | ansible.builtin.length) > 0
     - __host_podman_transition_stat['results'][2]['stat']['exists']
     - not __host_podman_transition_stat['results'][3]['stat']['exists']
-
 
 - name: "Config | Default | Record the absence of a pre-role policy.json (sentinel)"
   ansible.builtin.copy:
@@ -262,7 +248,6 @@
     - not __host_podman_transition_stat['results'][2]['stat']['exists']
     - not __host_podman_transition_stat['results'][3]['stat']['exists']
 
-
 - name: "Config | Default | Create policy.json (image trust policy)"
   ansible.builtin.copy:
     content: "{{ host_podman_policy | ansible.builtin.to_nice_json }}\n"
@@ -273,7 +258,6 @@
   when:
     - (host_podman_policy | ansible.builtin.length) > 0
 
-
 # Restores the pre-role state exactly: the saved original, or (zero-length
 # sentinel, see above) the absence of a policy.json. Without any saved
 # original the file is left alone: it is either a distribution file this role
@@ -283,13 +267,12 @@
   ansible.builtin.copy:
     src: "{{ __host_podman_policy_backup_file_path }}"
     dest: "{{ __host_podman_policy_file_path }}"
+    mode: "preserve"  # noqa: foundata-file-mode
     remote_src: true
-    mode: "preserve"
   when:
     - (host_podman_policy | ansible.builtin.length) == 0
     - __host_podman_transition_stat['results'][3]['stat']['exists']
     - (__host_podman_transition_stat['results'][3]['stat']['size'] | ansible.builtin.int) > 0
-
 
 - name: "Config | Default | Remove policy.json (policy cleared, no pre-role file existed)"
   ansible.builtin.file:
@@ -300,14 +283,12 @@
     - __host_podman_transition_stat['results'][3]['stat']['exists']
     - (__host_podman_transition_stat['results'][3]['stat']['size'] | ansible.builtin.int) == 0
 
-
 - name: "Config | Default | Remove the saved policy.json original (restored)"
   ansible.builtin.file:
     path: "{{ __host_podman_policy_backup_file_path }}"
     state: "absent"
   when:
     - (host_podman_policy | ansible.builtin.length) == 0
-
 
 ### SELinux file contexts for additional container storage paths
 
@@ -325,7 +306,6 @@
     - host_podman_selinux_manage | ansible.builtin.bool
     - ansible_facts['selinux']['status'] | ansible.builtin.default('') == 'enabled'
 
-
 ### Automatic container image updates (system podman-auto-update.timer)
 
 - name: "Config | Default | Manage systemd timer drop-in for automatic image updates"
@@ -334,7 +314,6 @@
     - host_podman_service_state != 'unmanaged'
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
   block:
-
     - name: "Config | Default | Ensure systemd timer override directory exists"
       ansible.builtin.file:
         path: "{{ __host_podman_auto_update_timer_dropin_dir_path }}"
@@ -343,8 +322,7 @@
         group: "{{ __host_podman_auto_update_timer_dropin_dir_group }}"
         mode: "{{ __host_podman_auto_update_timer_dropin_dir_mode }}"
       notify:
-        - "host_podman: systemd daemon-reload"
-
+        - "host_podman_reload_systemd_daemon"
 
     - name: "Config | Default | Create systemd timer drop-in config file"
       ansible.builtin.template:
@@ -356,9 +334,9 @@
       vars:
         # Pass (and/or adjust) variables needed for the template
         tpl_timer_settings: "{{ __host_podman_auto_update_timer_settings_effective }}"
+        tpl_managed: "{{ ansible_managed }}"
       notify:
-        - "host_podman: systemd daemon-reload"
-
+        - "host_podman_reload_systemd_daemon"
 
 # Also removed when service_state is "unmanaged": the role then fully backs off,
 # so its schedule override is dropped and the vendor timer schedule takes over
@@ -371,8 +349,7 @@
     - (not (host_podman_auto_update | ansible.builtin.bool)) or (host_podman_service_state == 'unmanaged')
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
   notify:
-    - "host_podman: systemd daemon-reload"
-
+    - "host_podman_reload_systemd_daemon"
 
 - name: "Config | Default | Warn about unsupported service manager for timer configuration"
   ansible.builtin.debug:
@@ -380,11 +357,11 @@
       Automatic image update timer management is only supported with systemd as
       service manager. The current service manager '{{ ansible_facts['service_mgr'] }}'
       is not supported; no update timer gets managed.
+    verbosity: 0
   when:
     - host_podman_auto_update | ansible.builtin.bool
     - host_podman_service_state != 'unmanaged'
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) != 'systemd'
-
 
 ### Rootless enablement for listed user accounts
 

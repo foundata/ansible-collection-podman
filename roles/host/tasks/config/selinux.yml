@@ -20,7 +20,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 ---
-
 # Every declared path gets a recursive restorecon -F: a path like /, /usr or
 # /var would relabel a system tree to container-storage contexts and break
 # the host. The obvious catastrophic mistakes are rejected here; this is a
@@ -83,17 +82,15 @@
   when:
     - (__host_podman_selinux_declared_paths | ansible.builtin.length) > 0
 
-
 - name: "Config | SELinux | Read the manifest of role-created equivalence rules"
   ansible.builtin.slurp:
     src: "{{ __host_podman_selinux_manifest_file_path }}"
-  register: __host_podman_selinux_manifest_slurp
   failed_when:
     # tolerate a missing manifest (first run; treated as empty below)
     - __host_podman_selinux_manifest_slurp['msg'] is ansible.builtin.defined
     - "'file not found' not in (__host_podman_selinux_manifest_slurp['msg'] | ansible.builtin.lower)"
 
-
+  register: __host_podman_selinux_manifest_slurp
 - name: "Config | SELinux | Determine the recorded rules and the stale ones among them"
   # splitlines() on purpose: split('\n') never splits real newlines in this
   # Jinja context (escape sequences are not collapsed), which silently
@@ -138,17 +135,16 @@
     substitute: "/var/lib/containers"
     state: "present"
     reload: true
-  register: __host_podman_sefcontext_result
   loop: "{{ __host_podman_selinux_declared_paths }}"
   loop_control:
     loop_var: "__host_podman_selinux_path_item"
 
-
-# Only after the rule (dis)appeared: newly created files inherit the
-# correct context automatically, and re-running restorecon -F over live
-# container storage would strip the MCS category labels Podman applies.
-# A handler is unsuitable as the per-path result gating is needed
-# (noqa: no-handler).
+  # Only after the rule (dis)appeared: newly created files inherit the
+  # correct context automatically, and re-running restorecon -F over live
+  # container storage would strip the MCS category labels Podman applies.
+  # A handler is unsuitable as the per-path result gating is needed
+  # (noqa: no-handler).
+  register: __host_podman_sefcontext_result
 - name: "Config | SELinux | Apply file contexts (restorecon)" # noqa: no-handler
   ansible.builtin.command:
     argv:
@@ -157,42 +153,39 @@
       - "-r"
       - "-v"
       - "{{ __host_podman_sefcontext_item['__host_podman_selinux_path_item'] }}"
-  register: __host_podman_restorecon_result
-  changed_when:
-    - (__host_podman_restorecon_result['stdout'] | ansible.builtin.length) > 0
   when:
     - __host_podman_sefcontext_item is ansible.builtin.changed
+  changed_when:
+    - (__host_podman_restorecon_result['stdout'] | ansible.builtin.length) > 0
   loop: "{{ __host_podman_sefcontext_result['results'] | ansible.builtin.default([]) }}"
   loop_control:
     loop_var: "__host_podman_sefcontext_item"
     label: "{{ __host_podman_sefcontext_item['__host_podman_selinux_path_item'] }}"
 
-
+  register: __host_podman_restorecon_result
 - name: "Config | SELinux | Remove file context equivalences for paths no longer declared"
   community.general.sefcontext:
     target: "{{ __host_podman_stale_path_item }}"
     substitute: "/var/lib/containers"
     state: "absent"
     reload: true
-  register: __host_podman_sefcontext_removal_result
   loop: "{{ __host_podman_selinux_stale_paths }}"
   loop_control:
     loop_var: "__host_podman_stale_path_item"
 
-
+  register: __host_podman_sefcontext_removal_result
 - name: "Config | SELinux | Check which de-listed paths still exist"
   ansible.builtin.stat:
     path: "{{ __host_podman_stale_stat_item }}"
-  register: __host_podman_selinux_stale_stat
   loop: "{{ __host_podman_selinux_stale_paths }}"
   loop_control:
     loop_var: "__host_podman_stale_stat_item"
     label: "{{ __host_podman_stale_stat_item }}"
 
-
-# Relabel the trees of de-listed paths back to the default policy context, so
-# a later reuse of the directory does not inherit container-storage labels.
-# Same per-path result gating as the apply task above (noqa: no-handler).
+  # Relabel the trees of de-listed paths back to the default policy context, so
+  # a later reuse of the directory does not inherit container-storage labels.
+  # Same per-path result gating as the apply task above (noqa: no-handler).
+  register: __host_podman_selinux_stale_stat
 - name: "Config | SELinux | Reset file contexts of de-listed paths (restorecon)" # noqa: no-handler
   ansible.builtin.command:
     argv:
@@ -201,26 +194,25 @@
       - "-r"
       - "-v"
       - "{{ __host_podman_sefcontext_removal_item['__host_podman_stale_path_item'] }}"
-  register: __host_podman_restorecon_reset_result
-  changed_when:
-    - (__host_podman_restorecon_reset_result['stdout'] | ansible.builtin.length) > 0
   when:
     - __host_podman_sefcontext_removal_item is ansible.builtin.changed
     - __host_podman_selinux_stale_stat['results'][__host_podman_selinux_stale_idx]['stat']['exists']
+  changed_when:
+    - (__host_podman_restorecon_reset_result['stdout'] | ansible.builtin.length) > 0
   loop: "{{ __host_podman_sefcontext_removal_result['results'] | ansible.builtin.default([]) }}"
   loop_control:
     loop_var: "__host_podman_sefcontext_removal_item"
     index_var: "__host_podman_selinux_stale_idx"
     label: "{{ __host_podman_sefcontext_removal_item['__host_podman_stale_path_item'] }}"
 
-
-# Owned after this run: every declared path. Declaration adopts a
-# pre-existing rule regardless of its previous value, so de-listing behaves
-# identically on every host (recording only changed results would leave an
-# identical pre-existing rule foreign while adopting a conflicting one).
-# The recursive restorecon stays gated on an actual sefcontext change:
-# adopting an already-identical rule must not relabel active container
-# storage.
+  # Owned after this run: every declared path. Declaration adopts a
+  # pre-existing rule regardless of its previous value, so de-listing behaves
+  # identically on every host (recording only changed results would leave an
+  # identical pre-existing rule foreign while adopting a conflicting one).
+  # The recursive restorecon stays gated on an actual sefcontext change:
+  # adopting an already-identical rule must not relabel active container
+  # storage.
+  register: __host_podman_restorecon_reset_result
 - name: "Config | SELinux | Determine the equivalence rules the role owns"
   ansible.builtin.set_fact:
     __host_podman_selinux_owned_paths: >-
@@ -243,7 +235,6 @@
     __host_podman_selinux_nl: "\n"
   when:
     - (__host_podman_selinux_owned_paths | ansible.builtin.length) > 0
-
 
 - name: "Config | SELinux | Remove the manifest (no rules owned)"
   ansible.builtin.file:

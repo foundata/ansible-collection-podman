@@ -4,23 +4,22 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 ---
-
 - name: "Setup | Uninstall | Stop and disable the managed systemd units"
   ansible.builtin.systemd_service:
     name: "{{ __host_podman_unit_item }}"
     state: "stopped"
     enabled: false
   # tolerate units that do not exist (e.g. Podman was never installed here)
-  failed_when: false
   when:
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+  failed_when:
+    - false
   loop:
     - "{{ __host_podman_auto_update_timer_unit_name }}"
     - "{{ __host_podman_api_socket_unit_name }}"
   loop_control:
     loop_var: "__host_podman_unit_item"
     label: "{{ __host_podman_unit_item }}"
-
 
 - name: "Setup | Uninstall | Revert the rootless enablement of the listed accounts"
   ansible.builtin.include_tasks:
@@ -32,7 +31,6 @@
     loop_var: "__host_podman_ru_raw_item"
     label: "{{ __host_podman_ru_raw_item['name'] }}"
 
-
 # Accounts the role enabled earlier but that are no longer listed (possibly
 # already deleted) are found through their manifests, so "absent" really
 # removes everything the role ever created.
@@ -43,7 +41,6 @@
       - "*.ansible-manifest"
     file_type: "file"
   register: __host_podman_uninstall_manifest_find
-
 
 - name: "Setup | Uninstall | Revert the rootless enablement of no longer listed accounts"
   ansible.builtin.include_tasks:
@@ -65,7 +62,6 @@
     loop_var: "__host_podman_ru_raw_item"
     label: "{{ __host_podman_ru_raw_item['name'] }}"
 
-
 # semanage rules cannot carry a marker; the manifest written by the config
 # tasks records the rules this role created, and an empty declared list
 # removes them all. With host_podman_selinux_manage set to false the role
@@ -79,7 +75,6 @@
     - host_podman_selinux_manage | ansible.builtin.bool
     - ansible_facts['selinux']['status'] | ansible.builtin.default('') == 'enabled'
 
-
 - name: "Setup | Uninstall | Remove the managed configuration drop-ins"
   ansible.builtin.file:
     path: "{{ __host_podman_dropin_path_item }}"
@@ -92,8 +87,7 @@
     loop_var: "__host_podman_dropin_path_item"
     label: "{{ __host_podman_dropin_path_item }}"
   notify:
-    - "host_podman: systemd daemon-reload"
-
+    - "host_podman_reload_systemd_daemon"
 
 # storage.conf and policy.json have no drop-in mechanism, so the config tasks
 # replace the whole file and save the pre-role original next to it (see
@@ -110,21 +104,20 @@
       - "-s" # no error messages about nonexistent files
       - "{{ __host_podman_file_marker }}"
       - "{{ __host_podman_storage_file_path }}"
-  register: __host_podman_storage_managed_result
-  changed_when: false
+  changed_when:
+    - false
   failed_when:
     - __host_podman_storage_managed_result['rc'] not in [0, 1, 2]
 
-
-# Result indexes: 0 = saved storage.conf original, 1 = saved policy.json
-# original.
+  # Result indexes: 0 = saved storage.conf original, 1 = saved policy.json
+  # original.
+  register: __host_podman_storage_managed_result
 - name: "Setup | Uninstall | Check for saved pre-role originals"
   ansible.builtin.stat:
     path: "{{ __host_podman_backup_path_item }}"
     get_checksum: false
     get_mime: false
     get_attributes: false
-  register: __host_podman_uninstall_backups_stat
   loop:
     - "{{ __host_podman_storage_backup_file_path }}"
     - "{{ __host_podman_policy_backup_file_path }}"
@@ -132,17 +125,16 @@
     loop_var: "__host_podman_backup_path_item"
     label: "{{ __host_podman_backup_path_item }}"
 
-
+  register: __host_podman_uninstall_backups_stat
 - name: "Setup | Uninstall | Restore the pre-role storage.conf"
   ansible.builtin.copy:
     src: "{{ __host_podman_storage_backup_file_path }}"
     dest: "{{ __host_podman_storage_file_path }}"
+    mode: "preserve"  # noqa: foundata-file-mode
     remote_src: true
-    mode: "preserve"
   when:
     - __host_podman_storage_managed_result['rc'] == 0
     - __host_podman_uninstall_backups_stat['results'][0]['stat']['exists']
-
 
 - name: "Setup | Uninstall | Remove the role-written storage.conf (no original saved)"
   ansible.builtin.file:
@@ -152,19 +144,17 @@
     - __host_podman_storage_managed_result['rc'] == 0
     - not __host_podman_uninstall_backups_stat['results'][0]['stat']['exists']
 
-
 # A zero-length saved original is the sentinel for "no pre-role policy.json
 # existed" (see the config tasks); restoring then means removing the file.
 - name: "Setup | Uninstall | Restore the pre-role policy.json"
   ansible.builtin.copy:
     src: "{{ __host_podman_policy_backup_file_path }}"
     dest: "{{ __host_podman_policy_file_path }}"
+    mode: "preserve"  # noqa: foundata-file-mode
     remote_src: true
-    mode: "preserve"
   when:
     - __host_podman_uninstall_backups_stat['results'][1]['stat']['exists']
     - (__host_podman_uninstall_backups_stat['results'][1]['stat']['size'] | ansible.builtin.int) > 0
-
 
 - name: "Setup | Uninstall | Remove policy.json (no pre-role file existed)"
   ansible.builtin.file:
@@ -173,7 +163,6 @@
   when:
     - __host_podman_uninstall_backups_stat['results'][1]['stat']['exists']
     - (__host_podman_uninstall_backups_stat['results'][1]['stat']['size'] | ansible.builtin.int) == 0
-
 
 - name: "Setup | Uninstall | Remove the saved pre-role originals"
   ansible.builtin.file:
@@ -186,7 +175,6 @@
     loop_var: "__host_podman_backup_removal_item"
     label: "{{ __host_podman_backup_removal_item }}"
 
-
 # Removed on its own, not as part of the list below: the package is absent
 # when host_podman_docker_compat is false, and the dnf5 backend (Fedora)
 # reacts to a removal list mixing missing and installed packages with an
@@ -196,7 +184,6 @@
   ansible.builtin.package:
     name: "{{ __host_podman_docker_compat_package }}"
     state: "absent"
-
 
 - name: "Setup | Uninstall | Remove packages"
   ansible.builtin.package:

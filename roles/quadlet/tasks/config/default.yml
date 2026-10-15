@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 ---
-
 # Order matters:
 #   1. host directories  -> bind-mount sources must exist before units start
 #   2. managed files     -> environment/config files referenced by the units
@@ -17,17 +16,15 @@
 #   7. manifest          -> records the application's current resources for
 #                           the next run's cleanup and for state "absent"
 
-
 - name: "Config | Default | Read the application manifest (previously created resources)"
   ansible.builtin.slurp:
     src: "{{ __quadlet_podman_manifest_file_path }}"
-  register: __quadlet_podman_manifest_slurp
   failed_when:
     # tolerate a missing manifest (first run; treated as empty below)
     - __quadlet_podman_manifest_slurp['msg'] is ansible.builtin.defined
     - "'file not found' not in (__quadlet_podman_manifest_slurp['msg'] | ansible.builtin.lower)"
 
-
+  register: __quadlet_podman_manifest_slurp
 - name: "Config | Default | Determine the previously created resources of the application"
   ansible.builtin.set_fact:
     __quadlet_podman_manifest_old: >-
@@ -53,11 +50,9 @@
     recurse: true
   register: __quadlet_podman_manifest_find
 
-
 - name: "Config | Default | Read the manifests of the other applications"
   ansible.builtin.slurp:
     src: "{{ __quadlet_podman_other_manifest_item }}"
-  register: __quadlet_podman_other_manifests_slurp
   loop: >-
     {{
       __quadlet_podman_manifest_find['files']
@@ -69,14 +64,14 @@
     loop_var: "__quadlet_podman_other_manifest_item"
     label: "{{ __quadlet_podman_other_manifest_item }}"
 
-
-# Resources are exclusively owned: declaration is authoritative for existence
-# and content, so two applications of one scope claiming the same secret name
-# or managed file would rewrite and delete each other's resources. Reject the
-# conflict before anything is changed (a shared credential can be declared
-# per application under different secret names with the same value).
-# Secrets, units and services only conflict within the same Podman scope;
-# files and directories are host-global and collected across ALL scopes.
+  # Resources are exclusively owned: declaration is authoritative for existence
+  # and content, so two applications of one scope claiming the same secret name
+  # or managed file would rewrite and delete each other's resources. Reject the
+  # conflict before anything is changed (a shared credential can be declared
+  # per application under different secret names with the same value).
+  # Secrets, units and services only conflict within the same Podman scope;
+  # files and directories are host-global and collected across ALL scopes.
+  register: __quadlet_podman_other_manifests_slurp
 - name: "Config | Default | Determine the resources claimed by the other applications"
   ansible.builtin.set_fact:
     __quadlet_podman_other_claims_now: >-
@@ -195,7 +190,6 @@
       state "absent" items may omit them.
     quiet: true
 
-
 # The shared unit directories are a scope-wide namespace: a destination that
 # already exists is only written when it carries THIS application's marker.
 # Files marked for another application and unmarked files (an administrator's
@@ -204,7 +198,6 @@
 - name: "Config | Default | Determine the state of the declared unit file destinations"
   ansible.builtin.stat:
     path: "{{ __quadlet_podman_unit_dest_item }}"
-  register: __quadlet_podman_unit_dest_stat
   loop: >-
     {{
       (__quadlet_podman_units_effective | ansible.builtin.map(attribute='filename')
@@ -216,7 +209,7 @@
     loop_var: "__quadlet_podman_unit_dest_item"
     label: "{{ __quadlet_podman_unit_dest_item }}"
 
-
+  register: __quadlet_podman_unit_dest_stat
 - name: "Config | Default | Determine which existing destinations this application owns"
   ansible.builtin.command:
     argv: >-
@@ -224,12 +217,6 @@
         [__quadlet_podman_grep_exec_path, '-l', '-s', '-x', '-F', '--', __quadlet_podman_file_marker]
         + __quadlet_podman_unit_dest_existing
       }}
-  register: __quadlet_podman_unit_dest_owned_result
-  changed_when: false
-  # read-only probe; run it under "--check" too
-  check_mode: false
-  failed_when:
-    - __quadlet_podman_unit_dest_owned_result['rc'] not in [0, 1, 2]
   vars:
     __quadlet_podman_unit_dest_existing: >-
       {{
@@ -240,7 +227,13 @@
   when:
     - (__quadlet_podman_unit_dest_existing | ansible.builtin.length) > 0
 
-
+  check_mode: false
+  changed_when:
+    - false
+  # read-only probe; run it under "--check" too
+  failed_when:
+    - __quadlet_podman_unit_dest_owned_result['rc'] not in [0, 1, 2]
+  register: __quadlet_podman_unit_dest_owned_result
 - name: "Config | Default | Check the existing destinations belong to this application"
   ansible.builtin.assert:
     that:
@@ -282,7 +275,6 @@
     loop_var: "__quadlet_podman_user_config_dir_item"
     label: "{{ __quadlet_podman_user_home }}/{{ __quadlet_podman_user_config_dir_item }}"
 
-
 - name: "Config | Default | Ensure the Quadlet unit directory exists"
   ansible.builtin.file:
     path: "{{ __quadlet_podman_unit_dir_path }}"
@@ -290,7 +282,6 @@
     owner: "{{ __quadlet_podman_file_owner }}"
     group: "{{ __quadlet_podman_file_group }}"
     mode: "{{ __quadlet_podman_unit_dir_mode }}"
-
 
 - name: "Config | Default | Manage host directories of the application"
   ansible.builtin.file:
@@ -306,7 +297,6 @@
     loop_var: "__quadlet_podman_dir_item"
     label: "{{ __quadlet_podman_dir_item['path'] }}"
 
-
 - name: "Config | Default | Manage files of the application"
   ansible.builtin.copy:
     content: "{{ __quadlet_podman_file_item['content'] | ansible.builtin.default('') }}"
@@ -321,8 +311,7 @@
     loop_var: "__quadlet_podman_file_item"
     label: "{{ __quadlet_podman_file_item['dest'] }}"
   notify:
-    - "quadlet_podman: restart application services"
-
+    - "quadlet_podman_restart_application_services"
 
 # The restart notify makes the removal effective for running services: a
 # started container keeps its bind-mounted file open (and its environment)
@@ -338,8 +327,7 @@
     loop_var: "__quadlet_podman_file_item"
     label: "{{ __quadlet_podman_file_item['dest'] }}"
   notify:
-    - "quadlet_podman: restart application services"
-
+    - "quadlet_podman_restart_application_services"
 
 # Declared secrets are authoritative for existence AND content: the current
 # value is read back (never logged) and a secret is only recreated when its
@@ -349,6 +337,7 @@
 # restarts the application services (Quadlet services recreate their
 # containers on start, which re-materializes the secret).
 - name: "Config | Default | Inspect the current values of the application's Podman secrets"
+  become: true
   ansible.builtin.command:
     argv:
       - "{{ __quadlet_podman_podman_exec_path }}"
@@ -358,10 +347,10 @@
       - "--format"
       - "{{ '{{.SecretData}}' }}"
       - "{{ __quadlet_podman_secret_item['name'] }}"
-  become: true
   become_user: "{{ __quadlet_podman_become_user }}"
   environment: "{{ __quadlet_podman_task_environment }}"
-  register: __quadlet_podman_secret_current
+  when:
+    - (__quadlet_podman_secret_item['state'] | ansible.builtin.default('present')) == 'present'
   changed_when:
     - false
   # a missing secret is the normal fresh case
@@ -369,14 +358,12 @@
     - false
   # read-only probe; run it under "--check" too so the comparison works there
   check_mode: false
-  no_log: true # secret values must not be leaked into logs or diffs
-  when:
-    - (__quadlet_podman_secret_item['state'] | ansible.builtin.default('present')) == 'present'
   loop: "{{ quadlet_podman_secrets }}"
   loop_control:
     loop_var: "__quadlet_podman_secret_item"
 
-
+  register: __quadlet_podman_secret_current
+  no_log: true # secret values must not be leaked into logs or diffs
 - name: "Config | Default | Determine the Podman secrets needing an update"
   ansible.builtin.set_fact:
     # names only: the value comparison happens inside this task, nothing but
@@ -395,8 +382,8 @@
       {{ __ns.names }}
   no_log: true # the comparison input contains secret values
 
-
 - name: "Config | Default | Manage Podman secrets of the application"
+  become: true
   containers.podman.podman_secret:
     name: "{{ __quadlet_podman_secret_item['name'] }}"
     # strip trailing newlines: a common source of subtle authentication
@@ -406,7 +393,6 @@
     force: true
     skip_existing: false
     executable: "{{ __quadlet_podman_podman_exec_path }}"
-  become: true
   become_user: "{{ __quadlet_podman_become_user }}"
   environment: "{{ __quadlet_podman_task_environment }}"
   when:
@@ -418,8 +404,7 @@
     loop_var: "__quadlet_podman_secret_item"
   no_log: true # secret values must not be leaked into logs or diffs
   notify:
-    - "quadlet_podman: restart application services"
-
+    - "quadlet_podman_restart_application_services"
 
 # A persistent authfile is used instead of podman's runtime-directory default,
 # so pulls by the generated services and podman-auto-update keep working after
@@ -434,22 +419,20 @@
   when:
     - (quadlet_podman_registry_auth | ansible.builtin.length) > 0
 
-
 - name: "Config | Default | Log in to the container registries of the application"
+  become: true
   containers.podman.podman_login:
     registry: "{{ __quadlet_podman_registry_item['registry'] }}"
     username: "{{ __quadlet_podman_registry_item['username'] }}"
     password: "{{ __quadlet_podman_registry_item['password'] }}"
     authfile: "{{ __quadlet_podman_authfile_path }}"
     executable: "{{ __quadlet_podman_podman_exec_path }}"
-  become: true
   become_user: "{{ __quadlet_podman_become_user }}"
   environment: "{{ __quadlet_podman_task_environment }}"
   loop: "{{ quadlet_podman_registry_auth }}"
   loop_control:
     loop_var: "__quadlet_podman_registry_item"
   no_log: true # registry credentials must not be leaked into logs or diffs
-
 
 - name: "Config | Default | Restrict the authentication file permissions"
   ansible.builtin.file:
@@ -459,7 +442,6 @@
     mode: "u=rw,g=,o=" # 0600
   when:
     - (quadlet_podman_registry_auth | ansible.builtin.length) > 0
-
 
 # Retire obsolete generated services BEFORE the unit files are rewritten: a
 # unit that keeps its file name but changes its generated service identity
@@ -472,7 +454,6 @@
 - name: "Config | Default | Read the owned Quadlet unit files (previous service identities)"
   ansible.builtin.slurp:
     src: "{{ __quadlet_podman_prev_unit_item }}"
-  register: __quadlet_podman_prev_unit_slurp
   loop: >-
     {{
       __quadlet_podman_unit_dest_owned_result['stdout_lines'] | ansible.builtin.default([])
@@ -483,7 +464,7 @@
     loop_var: "__quadlet_podman_prev_unit_item"
     label: "{{ __quadlet_podman_prev_unit_item }}"
 
-
+  register: __quadlet_podman_prev_unit_slurp
 - name: "Config | Default | Determine the obsolete generated services"
   ansible.builtin.set_fact:
     __quadlet_podman_obsolete_services: >-
@@ -516,28 +497,28 @@
 # other stop failure aborts the run BEFORE the old unit file is overwritten
 # (the file is the last remaining record of the old identity).
 - name: "Config | Default | Stop the obsolete generated services"
+  become: true
   ansible.builtin.systemd_service:
     name: "{{ __quadlet_podman_obsolete_service_item }}"
     state: "stopped"
     scope: "{{ __quadlet_podman_systemd_scope }}"
-  become: true
   become_user: "{{ __quadlet_podman_become_user }}"
   environment: "{{ __quadlet_podman_task_environment }}"
-  register: __quadlet_podman_obsolete_stop_result
+  when:
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
   failed_when:
     - __quadlet_podman_obsolete_stop_result is ansible.builtin.failed
     - >-
       (__quadlet_podman_obsolete_stop_result['msg'] | ansible.builtin.default('') | ansible.builtin.lower)
       is not ansible.builtin.search('not found|not loaded|could not be found|does not exist')
-  when:
-    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
   loop: "{{ __quadlet_podman_obsolete_services }}"
   loop_control:
     loop_var: "__quadlet_podman_obsolete_service_item"
     label: "{{ __quadlet_podman_obsolete_service_item }}"
 
-
+  register: __quadlet_podman_obsolete_stop_result
 - name: "Config | Default | Clear the failed state of the obsolete services"
+  become: true
   ansible.builtin.command:
     argv: >-
       {{
@@ -545,19 +526,19 @@
         + (['--user'] if (__quadlet_podman_rootless | ansible.builtin.bool) else [])
         + ['reset-failed', __quadlet_podman_obsolete_service_item]
       }}
-  become: true
   become_user: "{{ __quadlet_podman_become_user }}"
   environment: "{{ __quadlet_podman_task_environment }}"
-  changed_when: false
-  # tolerate services systemd does not know (unit was never started)
-  failed_when: false
   when:
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+  changed_when:
+    - false
+  # tolerate services systemd does not know (unit was never started)
+  failed_when:
+    - false
   loop: "{{ __quadlet_podman_obsolete_services }}"
   loop_control:
     loop_var: "__quadlet_podman_obsolete_service_item"
     label: "{{ __quadlet_podman_obsolete_service_item }}"
-
 
 - name: "Config | Default | Create the Quadlet unit files of the application"
   ansible.builtin.template:
@@ -571,14 +552,16 @@
     tpl_unit: "{{ __quadlet_podman_unit_item }}"
     tpl_service_map: "{{ __quadlet_podman_service_map }}"
     tpl_file_marker: "{{ __quadlet_podman_file_marker }}"
+    tpl_dependency_keys: "{{ __quadlet_podman_dependency_keys }}"
+    tpl_type_section_map: "{{ __quadlet_podman_type_section_map }}"
+    tpl_managed: "{{ ansible_managed }}"
   loop: "{{ __quadlet_podman_units_effective }}"
   loop_control:
     loop_var: "__quadlet_podman_unit_item"
     label: "{{ __quadlet_podman_unit_item['filename'] }}"
   notify:
-    - "quadlet_podman: systemd daemon-reload"
-    - "quadlet_podman: restart application services"
-
+    - "quadlet_podman_reload_systemd_daemon"
+    - "quadlet_podman_restart_application_services"
 
 # Plain units are restarted on change via their own handler (not the
 # application services one): e.g. a changed OnCalendar only takes effect
@@ -596,14 +579,15 @@
     tpl_unit: "{{ __quadlet_podman_systemd_unit_item }}"
     tpl_service_map: "{{ __quadlet_podman_service_map }}"
     tpl_file_marker: "{{ __quadlet_podman_file_marker }}"
+    tpl_dependency_keys: "{{ __quadlet_podman_dependency_keys }}"
+    tpl_managed: "{{ ansible_managed }}"
   loop: "{{ __quadlet_podman_systemd_units_effective }}"
   loop_control:
     loop_var: "__quadlet_podman_systemd_unit_item"
     label: "{{ __quadlet_podman_systemd_unit_item['name'] }}"
   notify:
-    - "quadlet_podman: systemd daemon-reload"
-    - "quadlet_podman: restart application systemd units"
-
+    - "quadlet_podman_reload_systemd_daemon"
+    - "quadlet_podman_restart_application_systemd_units"
 
 ### Cleanup: reap this application's units that are no longer listed
 
@@ -615,7 +599,6 @@
     file_type: "file"
   register: __quadlet_podman_find_result
 
-
 - name: "Config | Default | Determine stale unit files of the application"
   ansible.builtin.command:
     argv: >-
@@ -623,13 +606,6 @@
         [__quadlet_podman_grep_exec_path, '-l', '-s', '-x', '-F', '--', __quadlet_podman_file_marker]
         + __quadlet_podman_stale_candidates
       }}
-  register: __quadlet_podman_stale_result
-  changed_when: false
-  # read-only probe; run it under "--check" too so check mode reports the
-  # stale-unit removals instead of silently skipping them
-  check_mode: false
-  failed_when:
-    - __quadlet_podman_stale_result['rc'] not in [0, 1, 2]
   vars:
     __quadlet_podman_stale_candidates: >-
       {{
@@ -646,21 +622,27 @@
   when:
     - (__quadlet_podman_stale_candidates | ansible.builtin.length) > 0
 
-
-# The generated service name normally derives from the unit file name, but
-# a ServiceName= setting inside the file overrides it; the files still exist
-# here and are the authoritative source (same mechanism as in the uninstall
-# flow).
+  # The generated service name normally derives from the unit file name, but
+  # a ServiceName= setting inside the file overrides it; the files still exist
+  # here and are the authoritative source (same mechanism as in the uninstall
+  # flow).
+  check_mode: false
+  changed_when:
+    - false
+  # read-only probe; run it under "--check" too so check mode reports the
+  # stale-unit removals instead of silently skipping them
+  failed_when:
+    - __quadlet_podman_stale_result['rc'] not in [0, 1, 2]
+  register: __quadlet_podman_stale_result
 - name: "Config | Default | Read the stale unit files (service name resolution)"
   ansible.builtin.slurp:
     src: "{{ __quadlet_podman_stale_path_item }}"
-  register: __quadlet_podman_stale_slurp
   loop: "{{ __quadlet_podman_stale_result['stdout_lines'] | ansible.builtin.default([]) }}"
   loop_control:
     loop_var: "__quadlet_podman_stale_path_item"
     label: "{{ __quadlet_podman_stale_path_item }}"
 
-
+  register: __quadlet_podman_stale_slurp
 - name: "Config | Default | Map the stale unit files to their generated service names"
   ansible.builtin.set_fact:
     __quadlet_podman_stale_service_map: >-
@@ -684,29 +666,30 @@
 
 
 - name: "Config | Default | Stop the services of stale unit files"
+  become: true
   ansible.builtin.systemd_service:
     name: "{{ __quadlet_podman_stale_service }}"
     state: "stopped"
     scope: "{{ __quadlet_podman_systemd_scope }}"
-  become: true
   become_user: "{{ __quadlet_podman_become_user }}"
-  environment: "{{ __quadlet_podman_task_environment }}"
   vars:
     __quadlet_podman_stale_service: "{{ __quadlet_podman_stale_service_map[__quadlet_podman_stale_path_item] }}"
   # tolerate services that are not loaded (unit was never started or the
   # generator rejected it)
-  failed_when: false
+  environment: "{{ __quadlet_podman_task_environment }}"
   when:
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+  failed_when:
+    - false
   loop: "{{ __quadlet_podman_stale_result['stdout_lines'] | ansible.builtin.default([]) }}"
   loop_control:
     loop_var: "__quadlet_podman_stale_path_item"
     label: "{{ __quadlet_podman_stale_path_item }}"
 
-
 # Clear a possible "failed" state so the unit does not stay pinned in systemd
 # after its file is removed and the daemon reloaded.
 - name: "Config | Default | Clear the failed state of stale services"
+  become: true
   ansible.builtin.command:
     argv: >-
       {{
@@ -714,21 +697,21 @@
         + (['--user'] if (__quadlet_podman_rootless | ansible.builtin.bool) else [])
         + ['reset-failed', __quadlet_podman_stale_service]
       }}
-  become: true
   become_user: "{{ __quadlet_podman_become_user }}"
-  environment: "{{ __quadlet_podman_task_environment }}"
   vars:
     __quadlet_podman_stale_service: "{{ __quadlet_podman_stale_service_map[__quadlet_podman_stale_path_item] }}"
-  changed_when: false
-  # tolerate services systemd does not know (unit was never started)
-  failed_when: false
+  environment: "{{ __quadlet_podman_task_environment }}"
   when:
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+  changed_when:
+    - false
+  # tolerate services systemd does not know (unit was never started)
+  failed_when:
+    - false
   loop: "{{ __quadlet_podman_stale_result['stdout_lines'] | ansible.builtin.default([]) }}"
   loop_control:
     loop_var: "__quadlet_podman_stale_path_item"
     label: "{{ __quadlet_podman_stale_path_item }}"
-
 
 - name: "Config | Default | Remove stale unit files of the application"
   ansible.builtin.file:
@@ -739,8 +722,7 @@
     loop_var: "__quadlet_podman_stale_path_item"
     label: "{{ __quadlet_podman_stale_path_item }}"
   notify:
-    - "quadlet_podman: systemd daemon-reload"
-
+    - "quadlet_podman_reload_systemd_daemon"
 
 ### Cleanup: reap this application's plain systemd units no longer listed
 ### (marker-identified like the Quadlet files; other files in the shared
@@ -754,7 +736,6 @@
     file_type: "file"
   register: __quadlet_podman_systemd_find_result
 
-
 - name: "Config | Default | Determine stale plain systemd unit files of the application"
   ansible.builtin.command:
     argv: >-
@@ -762,13 +743,6 @@
         [__quadlet_podman_grep_exec_path, '-l', '-s', '-x', '-F', '--', __quadlet_podman_file_marker]
         + __quadlet_podman_systemd_stale_candidates
       }}
-  register: __quadlet_podman_systemd_stale_result
-  changed_when: false
-  # read-only probe; run it under "--check" too so check mode reports the
-  # stale-unit removals instead of silently skipping them
-  check_mode: false
-  failed_when:
-    - __quadlet_podman_systemd_stale_result['rc'] not in [0, 1, 2]
   vars:
     __quadlet_podman_systemd_stale_candidates: >-
       {{
@@ -785,30 +759,38 @@
   when:
     - (__quadlet_podman_systemd_stale_candidates | ansible.builtin.length) > 0
 
-
+  check_mode: false
+  changed_when:
+    - false
+  # read-only probe; run it under "--check" too so check mode reports the
+  # stale-unit removals instead of silently skipping them
+  failed_when:
+    - __quadlet_podman_systemd_stale_result['rc'] not in [0, 1, 2]
+  register: __quadlet_podman_systemd_stale_result
 - name: "Config | Default | Stop the stale plain systemd units"
+  become: true
   ansible.builtin.systemd_service:
     name: "{{ __quadlet_podman_stale_path_item | ansible.builtin.basename }}"
     state: "stopped"
     scope: "{{ __quadlet_podman_systemd_scope }}"
-  become: true
   become_user: "{{ __quadlet_podman_become_user }}"
   environment: "{{ __quadlet_podman_task_environment }}"
   # tolerate units that are not loaded (unit was never started)
-  failed_when: false
   when:
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+  failed_when:
+    - false
   loop: "{{ __quadlet_podman_systemd_stale_result['stdout_lines'] | ansible.builtin.default([]) }}"
   loop_control:
     loop_var: "__quadlet_podman_stale_path_item"
     label: "{{ __quadlet_podman_stale_path_item }}"
-
 
 # Disabling removes the enablement symlinks (e.g. in timers.target.wants/)
 # that would otherwise dangle after the unit file removal below. The command
 # module is used intentionally: ansible.builtin.systemd_service fails on
 # units without an Install section, this cleanup must tolerate them.
 - name: "Config | Default | Disable the stale plain systemd units"
+  become: true
   ansible.builtin.command:
     argv: >-
       {{
@@ -816,23 +798,24 @@
         + (['--user'] if (__quadlet_podman_rootless | ansible.builtin.bool) else [])
         + ['disable', __quadlet_podman_stale_path_item | ansible.builtin.basename]
       }}
-  become: true
   become_user: "{{ __quadlet_podman_become_user }}"
   environment: "{{ __quadlet_podman_task_environment }}"
-  changed_when: false
-  # tolerate units systemd does not know or that carry no Install section
-  failed_when: false
   when:
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+  changed_when:
+    - false
+  # tolerate units systemd does not know or that carry no Install section
+  failed_when:
+    - false
   loop: "{{ __quadlet_podman_systemd_stale_result['stdout_lines'] | ansible.builtin.default([]) }}"
   loop_control:
     loop_var: "__quadlet_podman_stale_path_item"
     label: "{{ __quadlet_podman_stale_path_item }}"
 
-
 # Clear a possible "failed" state so the unit does not stay pinned in systemd
 # after its file is removed and the daemon reloaded.
 - name: "Config | Default | Clear the failed state of the stale plain systemd units"
+  become: true
   ansible.builtin.command:
     argv: >-
       {{
@@ -840,19 +823,19 @@
         + (['--user'] if (__quadlet_podman_rootless | ansible.builtin.bool) else [])
         + ['reset-failed', __quadlet_podman_stale_path_item | ansible.builtin.basename]
       }}
-  become: true
   become_user: "{{ __quadlet_podman_become_user }}"
   environment: "{{ __quadlet_podman_task_environment }}"
-  changed_when: false
-  # tolerate units systemd does not know (unit was never started)
-  failed_when: false
   when:
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+  changed_when:
+    - false
+  # tolerate units systemd does not know (unit was never started)
+  failed_when:
+    - false
   loop: "{{ __quadlet_podman_systemd_stale_result['stdout_lines'] | ansible.builtin.default([]) }}"
   loop_control:
     loop_var: "__quadlet_podman_stale_path_item"
     label: "{{ __quadlet_podman_stale_path_item }}"
-
 
 - name: "Config | Default | Remove the stale plain systemd unit files of the application"
   ansible.builtin.file:
@@ -863,8 +846,7 @@
     loop_var: "__quadlet_podman_stale_path_item"
     label: "{{ __quadlet_podman_stale_path_item }}"
   notify:
-    - "quadlet_podman: systemd daemon-reload"
-
+    - "quadlet_podman_reload_systemd_daemon"
 
 ### Cleanup: reap manifest-recorded resources that are no longer declared
 ### (renamed or de-listed secrets, managed files and registry logins)
@@ -874,11 +856,11 @@
 # duplicate claim from role versions without the exclusivity check) is left
 # for that application instead of deleting it away underneath it.
 - name: "Config | Default | Remove Podman secrets no longer declared"
+  become: true
   containers.podman.podman_secret:
     name: "{{ __quadlet_podman_stale_secret_item }}"
     state: "absent"
     executable: "{{ __quadlet_podman_podman_exec_path }}"
-  become: true
   become_user: "{{ __quadlet_podman_become_user }}"
   environment: "{{ __quadlet_podman_task_environment }}"
   loop: >-
@@ -890,7 +872,6 @@
     }}
   loop_control:
     loop_var: "__quadlet_podman_stale_secret_item"
-
 
 - name: "Config | Default | Remove managed files no longer declared"
   ansible.builtin.file:
@@ -906,22 +887,20 @@
   loop_control:
     loop_var: "__quadlet_podman_stale_file_item"
   notify:
-    - "quadlet_podman: restart application services"
-
+    - "quadlet_podman_restart_application_services"
 
 # Removes de-listed registries from the application's OWN authfile;
 # credential isolation makes cross-application guards unnecessary (legacy
 # logins in a scope-shared auth.json are deliberately not touched, see
 # vars/main.yml).
 - name: "Config | Default | Log out of container registries no longer declared"
+  become: true
   containers.podman.podman_logout:
     registry: "{{ __quadlet_podman_stale_registry_item }}"
     authfile: "{{ __quadlet_podman_authfile_path }}"
     executable: "{{ __quadlet_podman_podman_exec_path }}"
-  become: true
   become_user: "{{ __quadlet_podman_become_user }}"
   environment: "{{ __quadlet_podman_task_environment }}"
-  register: __quadlet_podman_logout_result
   failed_when:
     # tolerate already-removed credentials or a hand-deleted authfile
     - __quadlet_podman_logout_result is ansible.builtin.failed
@@ -937,13 +916,13 @@
   loop_control:
     loop_var: "__quadlet_podman_stale_registry_item"
 
+  ### Manifest: record the application's current resources
 
-### Manifest: record the application's current resources
-
-# Written last so it only records what the run above actually ensured.
-# Owned by root on purpose (also in the user scope): the recorded file paths
-# get removed with root privileges later, so the service account must not be
-# able to modify them (see vars/main.yml).
+  # Written last so it only records what the run above actually ensured.
+  # Owned by root on purpose (also in the user scope): the recorded file paths
+  # get removed with root privileges later, so the service account must not be
+  # able to modify them (see vars/main.yml).
+  register: __quadlet_podman_logout_result
 - name: "Config | Default | Ensure the manifest directory of this scope exists"
   ansible.builtin.file:
     path: "{{ __quadlet_podman_manifest_dir_path }}"
@@ -953,12 +932,13 @@
     mode: "u=rwx,g=,o=" # 0700
   # the same predicate as the manifest write below: a units-only application
   # records its unit directories and service names too
-  when: >-
-    ((__quadlet_podman_secret_names_declared | ansible.builtin.length) > 0)
-    or ((__quadlet_podman_file_dests_declared | ansible.builtin.length) > 0)
-    or ((__quadlet_podman_registries_declared | ansible.builtin.length) > 0)
-    or ((quadlet_podman_units | ansible.builtin.length) > 0)
-    or ((quadlet_podman_systemd_units | ansible.builtin.length) > 0)
+  when:
+    - >-
+      ((__quadlet_podman_secret_names_declared | ansible.builtin.length) > 0)
+      or ((__quadlet_podman_file_dests_declared | ansible.builtin.length) > 0)
+      or ((__quadlet_podman_registries_declared | ansible.builtin.length) > 0)
+      or ((quadlet_podman_units | ansible.builtin.length) > 0)
+      or ((quadlet_podman_systemd_units | ansible.builtin.length) > 0)
 
 
 - name: "Config | Default | Record the application's resources in the manifest"
@@ -1003,12 +983,13 @@
            + (__quadlet_podman_systemd_units_effective | ansible.builtin.map(attribute='name') | ansible.builtin.list))
           | ansible.builtin.sort
         }}
-  when: >-
-    ((__quadlet_podman_secret_names_declared | ansible.builtin.length) > 0)
-    or ((__quadlet_podman_file_dests_declared | ansible.builtin.length) > 0)
-    or ((__quadlet_podman_registries_declared | ansible.builtin.length) > 0)
-    or ((quadlet_podman_units | ansible.builtin.length) > 0)
-    or ((quadlet_podman_systemd_units | ansible.builtin.length) > 0)
+  when:
+    - >-
+      ((__quadlet_podman_secret_names_declared | ansible.builtin.length) > 0)
+      or ((__quadlet_podman_file_dests_declared | ansible.builtin.length) > 0)
+      or ((__quadlet_podman_registries_declared | ansible.builtin.length) > 0)
+      or ((quadlet_podman_units | ansible.builtin.length) > 0)
+      or ((quadlet_podman_systemd_units | ansible.builtin.length) > 0)
 
 
 - name: "Config | Default | Remove the application manifest (no recorded resources)"

@@ -4,12 +4,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 ---
-
 - name: "Init | Include role meta data"
   ansible.builtin.include_vars:
     file: "../meta/main.yml"
     name: "__quadlet_podman_meta"
-
 
 - name: "Init | Check Ansible version requirement and fail if unmet"
   ansible.builtin.fail:
@@ -41,12 +39,9 @@
       or distribution facts are missing.
     verbosity: 1
   when:
-    - ansible_facts['os_family'] is not ansible.builtin.defined or
-      ansible_facts['distribution'] is not ansible.builtin.defined or
-      ansible_facts['distribution_version'] is not ansible.builtin.defined or
-      ansible_facts['distribution_major_version'] is not ansible.builtin.defined or
+    - ansible_facts['os_family'] is not ansible.builtin.defined or ansible_facts['distribution'] is not ansible.builtin.defined or
+      ansible_facts['distribution_version'] is not ansible.builtin.defined or ansible_facts['distribution_major_version'] is not ansible.builtin.defined or
       ((__quadlet_podman_supported_platforms | ansible.builtin.length) == 0)
-
 
 - name: "Init | Warn when platform is unsupported"
   ansible.builtin.fail:
@@ -72,7 +67,6 @@
     - (__quadlet_podman_supported_platforms | ansible.builtin.length) > 0
     - (__quadlet_podman_matched_versions | ansible.builtin.length) == 0
   ignore_errors: true # noqa: ignore-errors
-
 
 - name: "Init | Set platform-specific filename list (most to least specific; raw with possible duplicates)"
   ansible.builtin.set_fact:
@@ -138,7 +132,6 @@
   loop_control:
     loop_var: "__quadlet_podman_varsfile_item"
 
-
 ### quadlet specific
 
 - name: "Init | Check basic application input for validity"
@@ -163,7 +156,6 @@
       quadlet_podman_units must be unique, match '^[A-Za-z0-9_.-]+$' and must not
       reference the removed 'slirp4netns' network mode (use 'pasta' instead).
     quiet: true
-
 
 # Duplicate resource declarations are almost always a copy-paste error and,
 # combined with per-item state values, make the outcome order-dependent (one
@@ -195,7 +187,6 @@
       quadlet_podman_secrets and registries in quadlet_podman_registry_auth must
       be unique. Duplicate declarations make the outcome order-dependent.
     quiet: true
-
 
 # The merge result gets pruned: a null section or setting drops that entry
 # entirely, so units can unset something inherited from
@@ -302,7 +293,6 @@
       appended automatically).
     quiet: true
 
-
 # With declared credentials the role owns these two settings; a
 # user-supplied value would silently win or lose depending on ordering.
 - name: "Init | Check no unit overrides the application authentication file"
@@ -333,7 +323,6 @@
       {{ __ns.names }}
   when:
     - (quadlet_podman_registry_auth | ansible.builtin.length) > 0
-
 
 - name: "Init | Build the unit name to generated service name map"
   ansible.builtin.set_fact:
@@ -377,7 +366,6 @@
       they must not collide with a Quadlet unit file or generated service name
       of quadlet_podman_units.
     quiet: true
-
 
 - name: "Init | Build the effective plain systemd unit list"
   ansible.builtin.set_fact:
@@ -434,7 +422,6 @@
       Add an Install section (e.g. WantedBy) or use "running"/"disabled".
     quiet: true
 
-
 # Podman's generator requires the Quadlet FILE name including the .pod
 # suffix in Pod= (a bare pod name is rejected when the unit is generated).
 # Pods of other applications in the same scope are legitimate targets: the
@@ -465,7 +452,6 @@
     loop_var: "__quadlet_podman_unit_item"
     label: "{{ __quadlet_podman_unit_item['name'] }}"
 
-
 - name: "Init | Query the rootless target account"
   ansible.builtin.getent:
     database: "passwd"
@@ -473,7 +459,6 @@
     fail_key: false
   when:
     - __quadlet_podman_rootless | ansible.builtin.bool
-
 
 - name: "Init | Store rootless account facts"
   ansible.builtin.set_fact:
@@ -510,7 +495,6 @@
     - quadlet_podman_state == 'present'
     - __quadlet_podman_rootless | ansible.builtin.bool
   block:
-
     - name: "Init | Check the rootless target account exists"
       ansible.builtin.assert:
         that:
@@ -522,18 +506,15 @@
           usage via host_podman_rootless_users of the foundata.podman.host role.
         quiet: true
 
-
     - name: "Init | Check lingering status of the rootless target account"
       ansible.builtin.stat:
         path: "/var/lib/systemd/linger/{{ quadlet_podman_user }}"
       register: __quadlet_podman_linger_stat
 
-
     - name: "Init | Check the user runtime directory of the rootless target account"
       ansible.builtin.stat:
         path: "/run/user/{{ __quadlet_podman_user_uid }}"
       register: __quadlet_podman_runtime_dir_stat
-
 
     - name: "Init | Check the rootless prerequisites are met"
       ansible.builtin.assert:
@@ -548,17 +529,14 @@
           host_podman_rootless_users of the foundata.podman.host role first.
         quiet: true
 
-
 - name: "Init | Check the installed Podman version fits the application"
   when:
     - quadlet_podman_state == 'present'
   block:
-
     - name: "Init | Check the Podman executable is available"
       ansible.builtin.stat:
         path: "{{ __quadlet_podman_podman_exec_path }}"
       register: __quadlet_podman_exec_stat
-
 
     - name: "Init | Check Podman is installed"
       ansible.builtin.assert:
@@ -570,18 +548,17 @@
           foundata.podman.host role before deploying applications.
         quiet: true
 
-
     - name: "Init | Determine the installed Podman version"
       ansible.builtin.command:
         argv:
           - "{{ __quadlet_podman_podman_exec_path }}"
           - "--version"
-      register: __quadlet_podman_version_result
-      changed_when: false
+      changed_when:
+        - false
       # The probe is read-only; run it under "--check" too, otherwise it is
       # skipped and the next task fails on the missing stdout.
+      register: __quadlet_podman_version_result
       check_mode: false
-
 
     - name: "Init | Store the installed Podman version as fact"
       ansible.builtin.set_fact:
@@ -611,7 +588,6 @@
           {{ __quadlet_podman_artifact_min_podman_version }}.
         quiet: true
 
-
 ### Collisions with units the role does not own
 #
 # Quadlet output lands in the systemd generator directory, which loses
@@ -631,8 +607,8 @@
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
     - (__quadlet_podman_units_effective | ansible.builtin.length) > 0
   block:
-
     - name: "Init | Query the effective systemd unit of every generated service name"
+      become: true
       ansible.builtin.command:
         argv: >-
           {{
@@ -641,10 +617,10 @@
             + ['show', '--property=LoadState', '--property=FragmentPath', '--property=SourcePath',
                '--', __quadlet_podman_collision_service_item]
           }}
-      become: true
       become_user: "{{ __quadlet_podman_become_user }}"
       environment: "{{ __quadlet_podman_task_environment }}"
-      changed_when: false
+      changed_when:
+        - false
       # read-only; under "--check" the following assert would dereference a
       # missing result otherwise
       check_mode: false
@@ -653,8 +629,8 @@
         loop_var: "__quadlet_podman_collision_service_item"
       register: __quadlet_podman_collision_show_result
 
-
     - name: "Init | Determine the systemd unit search path of the scope"
+      become: true
       ansible.builtin.command:
         argv: >-
           {{
@@ -662,16 +638,16 @@
             + (['--user'] if (__quadlet_podman_rootless | ansible.builtin.bool) else [])
             + ['unit-paths']
           }}
-      become: true
       become_user: "{{ __quadlet_podman_become_user }}"
       environment: "{{ __quadlet_podman_task_environment }}"
-      changed_when: false
+      changed_when:
+        - false
       check_mode: false
       # older systemd releases without "unit-paths": the systemctl probe above
       # still covers everything that is effective
-      failed_when: false
+      failed_when:
+        - false
       register: __quadlet_podman_collision_paths_result
-
 
     - name: "Init | Search the unit search path for files named like a generated service"
       ansible.builtin.find:
@@ -691,7 +667,6 @@
       when:
         - (__quadlet_podman_collision_paths_result['rc'] | ansible.builtin.default(1)) == 0
       register: __quadlet_podman_collision_find_result
-
 
     - name: "Init | Check no foreign unit collides with a generated service name"
       ansible.builtin.assert:

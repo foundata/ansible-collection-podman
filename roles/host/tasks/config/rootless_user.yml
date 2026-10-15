@@ -7,7 +7,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 ---
-
 - name: "Config | Rootless | Merge defaults with the entry for '{{ __host_podman_ru_raw_item['name'] }}'"
   ansible.builtin.set_fact:
     __host_podman_ru: >-
@@ -27,7 +26,6 @@
     key: "{{ __host_podman_ru['name'] }}"
     fail_key: false
 
-
 - name: "Config | Rootless | Check the existence of the account '{{ __host_podman_ru['name'] }}'"
   ansible.builtin.assert:
     that:
@@ -40,19 +38,17 @@
   when:
     - __host_podman_ru['state'] == 'present'
 
-
 # The manifest carries the home path the role used last time, so the removal
 # below also works for an account that has been deleted in the meantime (its
 # home is deliberately preserved by this role).
 - name: "Config | Rootless | Read the manifest of '{{ __host_podman_ru['name'] }}'"
   ansible.builtin.slurp:
     src: "{{ __host_podman_rootless_manifest_file_path }}"
-  register: __host_podman_ru_manifest_slurp
   failed_when:
     - __host_podman_ru_manifest_slurp['msg'] is ansible.builtin.defined
     - "'file not found' not in (__host_podman_ru_manifest_slurp['msg'] | ansible.builtin.lower)"
 
-
+  register: __host_podman_ru_manifest_slurp
 - name: "Config | Rootless | Determine the recorded state of '{{ __host_podman_ru['name'] }}'"
   ansible.builtin.set_fact:
     __host_podman_ru_manifest_old: >-
@@ -81,14 +77,12 @@
     path: "{{ __host_podman_linger_dir_path }}/{{ __host_podman_ru['name'] }}"
   register: __host_podman_ru_linger_stat
 
-
 ### Revert enablement (entry state "absent" or role uninstall)
 
 - name: "Config | Rootless | Revert rootless enablement for '{{ __host_podman_ru['name'] }}'"
   when:
     - __host_podman_ru['state'] == 'absent'
   block:
-
     # Stop and disable the per-user timer BEFORE lingering goes away: only a
     # running user instance can remove the enablement symlink, and a
     # surviving symlink would reactivate the timer at the account's next
@@ -96,31 +90,30 @@
     # runtime directory): there is no running timer to stop then, but the
     # symlink is still removed root-side below.
     - name: "Config | Rootless | Disable the per-user automatic image update timer of '{{ __host_podman_ru['name'] }}'"
+      become: true
       ansible.builtin.systemd_service:
         name: "{{ __host_podman_auto_update_timer_unit_name }}"
-        scope: "user"
         state: "stopped"
         enabled: false
-      become: true
+        scope: "user"
       become_user: "{{ __host_podman_ru['name'] }}"
+      vars:
+        __host_podman_ru_absent_uid: "{{ ansible_facts['getent_passwd'][__host_podman_ru['name']][1] }}"
       environment:
         XDG_RUNTIME_DIR: "/run/user/{{ __host_podman_ru_absent_uid }}"
         DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ __host_podman_ru_absent_uid }}/bus"
-      vars:
-        __host_podman_ru_absent_uid: "{{ ansible_facts['getent_passwd'][__host_podman_ru['name']][1] }}"
-      register: __host_podman_ru_timer_disable_result
+      when:
+        - ansible_facts['getent_passwd'][__host_podman_ru['name']] is not ansible.builtin.none
+        - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+
+      # Root-side removal of the enablement symlink covers a user instance
+      # that was not reachable above.
       failed_when:
         - __host_podman_ru_timer_disable_result is ansible.builtin.failed
         - >-
           (__host_podman_ru_timer_disable_result['msg'] | ansible.builtin.default('') | ansible.builtin.lower)
           is not ansible.builtin.search('not found|not loaded|could not be found|does not exist|failed to connect')
-      when:
-        - ansible_facts['getent_passwd'][__host_podman_ru['name']] is not ansible.builtin.none
-        - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
-
-
-    # Root-side removal of the enablement symlink covers a user instance
-    # that was not reachable above.
+      register: __host_podman_ru_timer_disable_result
     - name: "Config | Rootless | Remove the timer enablement symlink of '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.file:
         path: >-
@@ -129,21 +122,20 @@
       when:
         - (__host_podman_ru_home_effective | ansible.builtin.length) > 0
 
-
     - name: "Config | Rootless | Disable lingering for '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.command:
         argv:
           - "{{ __host_podman_loginctl_exec_path }}"
           - "disable-linger"
           - "{{ __host_podman_ru['name'] }}"
-      changed_when: true
       when:
         - __host_podman_ru_linger_stat['stat']['exists']
         - ansible_facts['getent_passwd'][__host_podman_ru['name']] is not ansible.builtin.none
 
-
-    # loginctl cannot resolve a removed account, so its leftover flag file is
-    # dropped directly (root-owned, outside the account's tree).
+      # loginctl cannot resolve a removed account, so its leftover flag file is
+      # dropped directly (root-owned, outside the account's tree).
+      changed_when:
+        - true
     - name: "Config | Rootless | Remove the lingering flag of the removed account '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.file:
         path: "{{ __host_podman_linger_dir_path }}/{{ __host_podman_ru['name'] }}"
@@ -151,7 +143,6 @@
       when:
         - __host_podman_ru_linger_stat['stat']['exists']
         - ansible_facts['getent_passwd'][__host_podman_ru['name']] is ansible.builtin.none
-
 
     - name: "Config | Rootless | Remove managed per-user configuration files of '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.file:
@@ -167,34 +158,30 @@
         loop_var: "__host_podman_ru_config_item"
         label: "{{ __host_podman_ru_config_item }}"
 
-
     - name: "Config | Rootless | Remove the manifest of '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.file:
         path: "{{ __host_podman_rootless_manifest_file_path }}"
         state: "absent"
 
-    # Subordinate ID ranges and the account itself are deliberately kept
-    # (shared account properties; removing them is out of scope, see the
-    # host_podman_rootless_users documentation).
-
+# Subordinate ID ranges and the account itself are deliberately kept
+# (shared account properties; removing them is out of scope, see the
+# host_podman_rootless_users documentation).
 
 ### Enablement (entry state "present")
 
 - name: "Config | Rootless | Enable rootless Podman usage for '{{ __host_podman_ru['name'] }}'"
-  when:
-    - __host_podman_ru['state'] == 'present'
   vars:
     __host_podman_ru_uid: "{{ ansible_facts['getent_passwd'][__host_podman_ru['name']][1] }}"
     __host_podman_ru_gid: "{{ ansible_facts['getent_passwd'][__host_podman_ru['name']][2] }}"
     __host_podman_ru_home: "{{ ansible_facts['getent_passwd'][__host_podman_ru['name']][4] }}"
+  when:
+    - __host_podman_ru['state'] == 'present'
   block:
-
     ## Subordinate UID/GID ranges (required for the user namespace mapping)
 
     - name: "Config | Rootless | Read existing subordinate ID assignments"
       ansible.builtin.slurp:
         src: "{{ __host_podman_subid_file_item }}"
-      register: __host_podman_ru_subid_slurp
       failed_when:
         # tolerate missing files (treated as empty below); lineinfile creates them
         - __host_podman_ru_subid_slurp['msg'] is ansible.builtin.defined
@@ -206,7 +193,7 @@
         loop_var: "__host_podman_subid_file_item"
         label: "{{ __host_podman_subid_file_item }}"
 
-
+      register: __host_podman_ru_subid_slurp
     - name: "Config | Rootless | Compute subordinate ID facts for '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.set_fact:
         __host_podman_ru_subuid_line_count: >-
@@ -295,9 +282,10 @@
           {%-   endif -%}
           {%- endfor -%}
           {{ __ns.items }}
-      when: >-
-        (__host_podman_ru['subuid'] is ansible.builtin.defined)
-        or (__host_podman_ru['subgid'] is ansible.builtin.defined)
+      when:
+        - >-
+          (__host_podman_ru['subuid'] is ansible.builtin.defined)
+          or (__host_podman_ru['subgid'] is ansible.builtin.defined)
 
 
     # newuidmap(1)/newgidmap(1) treat multiple lines of one account as
@@ -313,6 +301,9 @@
         regexp: >-
           ^{{ __host_podman_ru['name'] | ansible.builtin.regex_escape }}:[^\n]*\n(?=[\s\S]*?^{{ __host_podman_ru['name'] | ansible.builtin.regex_escape }}:)
         replace: ""
+      when:
+        - (__host_podman_ru_dedup_item['count'] | ansible.builtin.int) > 1
+
       loop:
         - path: "{{ __host_podman_subuid_file_path }}"
           count: "{{ __host_podman_ru_subuid_line_count }}"
@@ -321,10 +312,6 @@
       loop_control:
         loop_var: "__host_podman_ru_dedup_item"
         label: "{{ __host_podman_ru_dedup_item['path'] }}"
-      when:
-        - (__host_podman_ru_dedup_item['count'] | ansible.builtin.int) > 1
-
-
     - name: "Config | Rootless | Ensure subordinate UID range for '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.lineinfile:
         path: "{{ __host_podman_subuid_file_path }}"
@@ -342,9 +329,7 @@
           }}
       when:
         # enforce explicit ranges; leave existing automatic assignments alone
-        - (__host_podman_ru['subuid'] is ansible.builtin.defined)
-          or ((__host_podman_ru_subuid_line_count | ansible.builtin.int) == 0)
-
+        - (__host_podman_ru['subuid'] is ansible.builtin.defined) or ((__host_podman_ru_subuid_line_count | ansible.builtin.int) == 0)
 
     - name: "Config | Rootless | Ensure subordinate GID range for '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.lineinfile:
@@ -363,9 +348,7 @@
           }}
       when:
         # enforce explicit ranges; leave existing automatic assignments alone
-        - (__host_podman_ru['subgid'] is ansible.builtin.defined)
-          or ((__host_podman_ru_subgid_line_count | ansible.builtin.int) == 0)
-
+        - (__host_podman_ru['subgid'] is ansible.builtin.defined) or ((__host_podman_ru_subgid_line_count | ansible.builtin.int) == 0)
 
     ## Lingering (persistent per-user systemd instance, required for services
     ## that start at boot and survive logout)
@@ -376,30 +359,30 @@
           - "{{ __host_podman_loginctl_exec_path }}"
           - "enable-linger"
           - "{{ __host_podman_ru['name'] }}"
-      changed_when: true
       when:
         - __host_podman_ru['linger'] | ansible.builtin.bool
         - not __host_podman_ru_linger_stat['stat']['exists']
         - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
 
-
+      changed_when:
+        - true
     - name: "Config | Rootless | Linger is false, disable lingering for '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.command:
         argv:
           - "{{ __host_podman_loginctl_exec_path }}"
           - "disable-linger"
           - "{{ __host_podman_ru['name'] }}"
-      changed_when: true
       when:
         - not (__host_podman_ru['linger'] | ansible.builtin.bool)
         - __host_podman_ru_linger_stat['stat']['exists']
         - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
 
-
-    # loginctl enable-linger only queues the user manager start; when the
-    # same UID was torn down moments before (an account was replaced), that
-    # start can get lost in the still-running deactivation. The explicit
-    # start is idempotent and waits for the old instance to finish stopping.
+      # loginctl enable-linger only queues the user manager start; when the
+      # same UID was torn down moments before (an account was replaced), that
+      # start can get lost in the still-running deactivation. The explicit
+      # start is idempotent and waits for the old instance to finish stopping.
+      changed_when:
+        - true
     - name: "Config | Rootless | Ensure the running user manager of '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.systemd_service:
         name: "user@{{ __host_podman_ru_uid }}.service"
@@ -407,7 +390,6 @@
       when:
         - __host_podman_ru['linger'] | ansible.builtin.bool
         - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
-
 
     # The bus socket appears AFTER the runtime directory: waiting only for
     # the directory raced "systemctl --user" against the starting user
@@ -420,7 +402,6 @@
         - __host_podman_ru['linger'] | ansible.builtin.bool
         - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
 
-
     ## Per-user configuration files (~/.config/containers/)
 
     - name: "Config | Rootless | Ensure the per-user configuration directory for '{{ __host_podman_ru['name'] }}'"
@@ -430,10 +411,11 @@
         owner: "{{ __host_podman_ru['name'] }}"
         group: "{{ __host_podman_ru_gid }}"
         mode: "{{ __host_podman_user_config_dir_mode }}"
-      when: >-
-        ((__host_podman_ru['containers'] | ansible.builtin.length) > 0)
-        or ((__host_podman_ru['storage'] | ansible.builtin.length) > 0)
-        or ((__host_podman_ru['registries'] | ansible.builtin.length) > 0)
+      when:
+        - >-
+          ((__host_podman_ru['containers'] | ansible.builtin.length) > 0)
+          or ((__host_podman_ru['storage'] | ansible.builtin.length) > 0)
+          or ((__host_podman_ru['registries'] | ansible.builtin.length) > 0)
 
 
     # Unlike the system-wide storage.conf, the per-user files render only the
@@ -453,6 +435,7 @@
         tpl_storage_settings: "{{ __host_podman_ru['storage'] }}"
         tpl_registries_settings: "{{ __host_podman_ru['registries'] }}"
         tpl_file_marker: "{{ __host_podman_file_marker }}"
+        tpl_managed: "{{ ansible_managed }}"
       when:
         - (__host_podman_ru[__host_podman_ru_cfg_item['key']] | ansible.builtin.length) > 0
       loop:
@@ -468,7 +451,6 @@
       loop_control:
         loop_var: "__host_podman_ru_cfg_item"
         label: "{{ __host_podman_ru_cfg_item['filename'] }}"
-
 
     - name: "Config | Rootless | Remove unset per-user configuration files of '{{ __host_podman_ru['name'] }}'"
       ansible.builtin.file:
@@ -487,30 +469,28 @@
         loop_var: "__host_podman_ru_cfg_item"
         label: "{{ __host_podman_ru_cfg_item['filename'] }}"
 
-
     ## Per-user automatic image updates (podman-auto-update.timer, user scope)
 
     # Needs the per-user systemd instance, therefore gated on lingering.
     # XDG_RUNTIME_DIR (and the bus address) must point at the user's runtime
     # directory for systemctl --user to reach the right instance.
     - name: "Config | Rootless | Ensure per-user automatic image update timer state for '{{ __host_podman_ru['name'] }}'"
+      become: true
       ansible.builtin.systemd_service:
         name: "{{ __host_podman_auto_update_timer_unit_name }}"
-        scope: "user"
         state: "{{ 'started' if (__host_podman_ru_timer_on and host_podman_service_state in ['enabled', 'running']) else 'stopped' }}"
         enabled: "{{ true if (__host_podman_ru_timer_on and host_podman_service_state == 'enabled') else false }}"
-      become: true
+        scope: "user"
       become_user: "{{ __host_podman_ru['name'] }}"
+      vars:
+        __host_podman_ru_timer_on: "{{ __host_podman_ru['auto_update'] | ansible.builtin.bool }}"
       environment:
         XDG_RUNTIME_DIR: "/run/user/{{ __host_podman_ru_uid }}"
         DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ __host_podman_ru_uid }}/bus"
-      vars:
-        __host_podman_ru_timer_on: "{{ __host_podman_ru['auto_update'] | ansible.builtin.bool }}"
       when:
         - __host_podman_ru['linger'] | ansible.builtin.bool
         - host_podman_service_state != 'unmanaged'
         - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
-
 
     ## Ownership record (see __host_podman_rootless_manifest_dir_path)
 
@@ -521,7 +501,6 @@
         owner: "root"
         group: "root"
         mode: "u=rwx,g=,o=" # 0700
-
 
     # Written last so it only records what the run above actually ensured.
     - name: "Config | Rootless | Record the managed home in the manifest of '{{ __host_podman_ru['name'] }}'"
