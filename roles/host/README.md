@@ -205,7 +205,7 @@ are included for completeness and to cover edge cases:
 
 ## Role variables<a id="variables"></a>
 
-Main entry point for the foundata.podman.host role
+Main entry point for the foundata.podman.host role.
 
 Install and configure Podman container hosts.
 
@@ -214,8 +214,8 @@ The following variables can be configured for this role:
 |                 Variable                 |  Type  | Required |   Default   | Description (abstract) |
 | ---------------------------------------- | ------ | -------- | ----------- | ---------------------- |
 | `host_podman_state`                      | `str`  | No       | `"present"` | Determines whether the managed resources should be `present` or `absent`.<br><br>`present` ensures that required components, such as software packages, are installed and configured.<br><br>`absent` reverts changes as much as possible, such as […](#variable-host_podman_state) |
-| `host_podman_autoupgrade`                | `bool` | No       | `false`     | If set to `true`, all managed packages will be upgraded during each Ansible run (e.g., when the package provider detects a newer version than the currently installed one).<br><br>Note: This only affects the packages that provide Podman and its […](#variable-host_podman_autoupgrade) |
-| `host_podman_service_state`              | `str`  | No       | `"enabled"` | Defines the status of the service(s).<br><br>`enabled`: Service is running and will start automatically at boot.<br><br>`disabled`: Service is stopped and will not start automatically at boot.<br><br>`running`: Service is running but will not start […](#variable-host_podman_service_state) |
+| `host_podman_autoupgrade`                | `bool` | No       | `false`     | If set to `true`, each Ansible run upgrades the managed packages to the newest version the package provider offers.<br><br>Note: This only affects the packages that provide Podman and its companion tooling itself (e.g., `podman`, `netavark`, […](#variable-host_podman_autoupgrade) |
+| `host_podman_service_state`              | `str`  | No       | `"enabled"` | Defines the status of the service(s). Possible values:<br><br>- `enabled`: Service is running and will start automatically at boot. - `disabled`: Service is stopped and will not start automatically at boot. - `running`: Service is running but will […](#variable-host_podman_service_state) |
 | `host_podman_containers`                 | `dict` | No       | `{}`        | Additional settings for the system-wide Podman container engine configuration at `/etc/containers/containers.conf`.<br><br>Dictionary structure:<br><br>- Keys: TOML section names of `containers.conf` (e.g. `containers`, `engine`, `network`, […](#variable-host_podman_containers) |
 | `host_podman_storage`                    | `dict` | No       | `{}`        | Additional settings for the system-wide Podman storage configuration at `/etc/containers/storage.conf`.<br><br>Dictionary structure:<br><br>- Keys: TOML section names of `storage.conf` (e.g. `storage`, `storage.options`, `storage.options.overlay`). - […](#variable-host_podman_storage) |
 | `host_podman_registries`                 | `dict` | No       | `{}`        | Additional settings for the system-wide container image registry configuration at `/etc/containers/registries.conf`.<br><br>Dictionary structure:<br><br>- Keys: Top-level TOML settings of `registries.conf` (e.g. `unqualified-search-registries`, […](#variable-host_podman_registries) |
@@ -251,9 +251,8 @@ settings, …
 
 [*⇑ Back to ToC ⇑*](#toc)
 
-If set to `true`, all managed packages will be upgraded during each Ansible
-run (e.g., when the package provider detects a newer version than the
-currently installed one).
+If set to `true`, each Ansible run upgrades the managed packages to the
+newest version the package provider offers.
 
 Note: This only affects the packages that provide Podman and its companion
 tooling itself (e.g., `podman`, `netavark`, `aardvark-dns`, `passt`). It does
@@ -271,23 +270,19 @@ Quadlet units (see the `foundata.podman.quadlet` role).
 
 [*⇑ Back to ToC ⇑*](#toc)
 
-Defines the status of the service(s).
+Defines the status of the service(s). Possible values:
 
-`enabled`: Service is running and will start automatically at boot.
+- `enabled`: Service is running and will start automatically at boot.
+- `disabled`: Service is stopped and will not start automatically at boot.
+- `running`: Service is running but will not start automatically at boot.
+  This can be used to start a service on the first Ansible run without
+  enabling it for boot.
+- `unmanaged`: Ansible does not manage the service at all: both the
+  running state and the boot (enablement) state are left exactly as they
+  are. This is primarily useful when services are monitored and managed
+  by systems other than Ansible.
 
-`disabled`: Service is stopped and will not start automatically at boot.
-
-`running`: Service is running but will not start automatically at boot.
-This can be used to start a service on the first Ansible run without
-enabling it for boot.
-
-`unmanaged`: Ansible does not manage the service at all: both the
-running state and the boot (enablement) state are left exactly as they
-are. This is primarily useful when services are monitored and managed
-by systems other than Ansible.
-
-The singular form (`service`) is used for simplicity. However, the defined
-status applies to all services if multiple are being managed by this role.
+The defined status applies to all services if the role manages several.
 
 Podman itself is daemonless, so there is no main service to manage. The
 units covered by this variable are the system `podman-auto-update.timer`

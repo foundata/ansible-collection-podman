@@ -304,7 +304,7 @@ are included for completeness and to cover edge cases:
 
 ## Role variables<a id="variables"></a>
 
-Main entry point for the foundata.podman.quadlet role
+Main entry point for the foundata.podman.quadlet role.
 
 Manage Podman workloads through systemd Quadlet units.
 
@@ -314,7 +314,7 @@ The following variables can be configured for this role:
 | ----------------------------------- | ------ | -------- | ----------- | ---------------------- |
 | `quadlet_podman_app`                | `str`  | Yes      | N/A         | Identifier of the application this set of Quadlet units belongs to (e.g. `zammad`, `keycloak`). Allowed characters: lowercase letters, digits, `_` and `-`.<br><br>One role invocation manages one application: a coherent set of Quadlet units (plus […](#variable-quadlet_podman_app) |
 | `quadlet_podman_state`              | `str`  | No       | `"present"` | Determines whether the managed resources should be `present` or `absent`.<br><br>`present` ensures that the application's Quadlet units, secrets, directories and files are deployed and its services are managed.<br><br>`absent` stops the application's […](#variable-quadlet_podman_state) |
-| `quadlet_podman_service_state`      | `str`  | No       | `"enabled"` | Defines the status of the service(s).<br><br>`enabled`: Service is running and will start automatically at boot.<br><br>`disabled`: Service is stopped and will not start automatically at boot.<br><br>`running`: Service is running but will not start […](#variable-quadlet_podman_service_state) |
+| `quadlet_podman_service_state`      | `str`  | No       | `"enabled"` | Defines the status of the service(s). Possible values:<br><br>- `enabled`: Service is running and will start automatically at boot. - `disabled`: Service is stopped and will not start automatically at boot. - `running`: Service is running but will […](#variable-quadlet_podman_service_state) |
 | `quadlet_podman_user`               | `str`  | No       | `""`        | Name of the user account to deploy the application for, selecting rootless or rootful operation:<br><br>- Empty (the default): rootful. Quadlet units are placed below `/etc/containers/systemd/` and the generated services run as system services. - Set […](#variable-quadlet_podman_user) |
 | `quadlet_podman_units`              | `list` | No       | `[]`        | List of the Quadlet units that make up the application. Each list item describes one Quadlet file and is rendered from its `sections` dictionary; the full set of available sections and settings is documented in `man podman-systemd.unit` or […](#variable-quadlet_podman_units) |
 | `quadlet_podman_systemd_units`      | `list` | No       | `[]`        | List of plain systemd units that belong to the application but are not Quadlet types, typically timers that trigger run-once containers or small oneshot helper services. The files are written to `/etc/systemd/system/` (rootful) or […](#variable-quadlet_podman_systemd_units) |
@@ -383,29 +383,25 @@ if nothing in it is needed anymore.
 
 [*⇑ Back to ToC ⇑*](#toc)
 
-Defines the status of the service(s).
+Defines the status of the service(s). Possible values:
 
-`enabled`: Service is running and will start automatically at boot.
+- `enabled`: Service is running and will start automatically at boot.
+- `disabled`: Service is stopped and will not start automatically at boot.
+- `running`: Service is running but will not start automatically at boot.
+  This can be used to start a service on the first Ansible run without
+  enabling it for boot.
+- `unmanaged`: Ansible does not manage the service at all: both the
+  running state and the boot (enablement) state are left exactly as
+  they are. This is primarily useful when services are monitored and
+  managed by systems other than Ansible. It applies to the CURRENTLY
+  declared service only: removing a unit or changing its generated
+  service name (e.g. via `ServiceName`) retires the previous service,
+  `unmanaged` does not preserve obsolete identities.
 
-`disabled`: Service is stopped and will not start automatically at boot.
-
-`running`: Service is running but will not start automatically at boot.
-This can be used to start a service on the first Ansible run without
-enabling it for boot.
-
-`unmanaged`: Ansible does not manage the service at all: both the
-running state and the boot (enablement) state are left exactly as they
-are. This is primarily useful when services are monitored and managed
-by systems other than Ansible. It applies to the CURRENTLY declared
-service only: removing a unit or changing its generated service name
-(e.g. via `ServiceName`) retires the previous service, `unmanaged`
-does not preserve obsolete identities.
-
-The singular form (`service`) is used for simplicity. However, the defined
-status applies to all services if multiple are being managed by this role.
-Individual units can deviate via their own `service_state` entry in
-`quadlet_podman_units` or `quadlet_podman_systemd_units` (e.g. a run-once
-container that only its timer may start).
+The defined status applies to all services if the role manages
+several. Individual units can deviate via their own `service_state`
+entry in `quadlet_podman_units` or `quadlet_podman_systemd_units`
+(e.g. a run-once container that only its timer may start).
 
 The role manages the systemd services generated from the units in
 `quadlet_podman_units`, in dependency order (e.g. a pod before its member

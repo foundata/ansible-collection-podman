@@ -12,7 +12,7 @@ argument_specs:
 
   # foundata.podman/roles/quadlet/tasks/main.yml entry point
   main:
-    short_description: "Main entry point for the foundata.podman.quadlet role"
+    short_description: "Main entry point for the foundata.podman.quadlet role."
     description: |
       Manage Podman workloads through systemd Quadlet units.
     options:
@@ -64,29 +64,25 @@ argument_specs:
 
       quadlet_podman_service_state:
         description: |
-          Defines the status of the service(s).
+          Defines the status of the service(s). Possible values:
 
-          `enabled`: Service is running and will start automatically at boot.
+          - `enabled`: Service is running and will start automatically at boot.
+          - `disabled`: Service is stopped and will not start automatically at boot.
+          - `running`: Service is running but will not start automatically at boot.
+            This can be used to start a service on the first Ansible run without
+            enabling it for boot.
+          - `unmanaged`: Ansible does not manage the service at all: both the
+            running state and the boot (enablement) state are left exactly as
+            they are. This is primarily useful when services are monitored and
+            managed by systems other than Ansible. It applies to the CURRENTLY
+            declared service only: removing a unit or changing its generated
+            service name (e.g. via `ServiceName`) retires the previous service,
+            `unmanaged` does not preserve obsolete identities.
 
-          `disabled`: Service is stopped and will not start automatically at boot.
-
-          `running`: Service is running but will not start automatically at boot.
-          This can be used to start a service on the first Ansible run without
-          enabling it for boot.
-
-          `unmanaged`: Ansible does not manage the service at all: both the
-          running state and the boot (enablement) state are left exactly as they
-          are. This is primarily useful when services are monitored and managed
-          by systems other than Ansible. It applies to the CURRENTLY declared
-          service only: removing a unit or changing its generated service name
-          (e.g. via `ServiceName`) retires the previous service, `unmanaged`
-          does not preserve obsolete identities.
-
-          The singular form (`service`) is used for simplicity. However, the defined
-          status applies to all services if multiple are being managed by this role.
-          Individual units can deviate via their own `service_state` entry in
-          `quadlet_podman_units` or `quadlet_podman_systemd_units` (e.g. a run-once
-          container that only its timer may start).
+          The defined status applies to all services if the role manages
+          several. Individual units can deviate via their own `service_state`
+          entry in `quadlet_podman_units` or `quadlet_podman_systemd_units`
+          (e.g. a run-once container that only its timer may start).
 
           The role manages the systemd services generated from the units in
           `quadlet_podman_units`, in dependency order (e.g. a pod before its member
