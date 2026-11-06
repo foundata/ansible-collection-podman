@@ -1,0 +1,6 @@
+---
+minor_changes:
+  - >-
+    quadlet - add per-unit ``restart_on_change`` (default ``true``) to exclude
+    selected services from change-triggered application restarts while still
+    starting them for service states ``enabled`` and ``running``.

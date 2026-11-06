@@ -9,6 +9,10 @@
   ansible.builtin.include_tasks:
     file: "{{ __testing_verify_taskdir }}/quadlet/change-result.yml"
 
+- name: "Molecule | Verify | quadlet | Verify restart opt-out"
+  ansible.builtin.include_tasks:
+    file: "{{ __testing_verify_taskdir }}/quadlet/restart-on-change.yml"
+
 ### Rootful application ("webtest")
 
 - name: "Molecule | Verify | quadlet | Read the webtest container unit file"

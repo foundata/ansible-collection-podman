@@ -333,7 +333,7 @@ __quadlet_podman_dependency_keys:
 # in tasks/init.yml. A unit is managed if it carries an Install section
 # (volumes/networks/images without one start on demand as dependencies) or an
 # explicit per-unit service_state; the per-unit effective service_state then
-# decides the list: start (enabled/running, also the restart handler's set) or
+# decides the list: start (enabled/running) or
 # stop (disabled). Units with an effective "unmanaged" are in neither.
 #
 # Lazy / late-bound evaluation: Jinja renders these variables on access, after
@@ -349,6 +349,14 @@ __quadlet_podman_services_start: >-
   {{
     __quadlet_podman_units_start_order
     | ansible.builtin.selectattr('service_state', 'ansible.builtin.in', ['enabled', 'running'])
+    | ansible.builtin.map(attribute='service') | ansible.builtin.list
+  }}
+# Keep startup independent from the opt-out for change-triggered restarts.
+__quadlet_podman_services_restart: >-
+  {{
+    __quadlet_podman_units_start_order
+    | ansible.builtin.selectattr('service_state', 'ansible.builtin.in', ['enabled', 'running'])
+    | ansible.builtin.selectattr('restart_on_change')
     | ansible.builtin.map(attribute='service') | ansible.builtin.list
   }}
 __quadlet_podman_services_stop: >-

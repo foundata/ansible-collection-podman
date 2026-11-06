@@ -264,6 +264,7 @@
               'sections': __sns.sections,
               'has_install': ('Install' in __sns.sections),
               'service_state': __u['service_state'] | ansible.builtin.default(quadlet_podman_service_state),
+              'restart_on_change': __u['restart_on_change'] | ansible.builtin.default(true) | ansible.builtin.bool,
               'managed': (__type in ['container', 'pod', 'kube'])
                          or ('Install' in __sns.sections)
                          or (__u['service_state'] is ansible.builtin.defined),

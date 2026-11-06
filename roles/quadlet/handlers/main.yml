@@ -30,7 +30,7 @@
   when:
     - quadlet_podman_state == 'present'
     - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
-  loop: "{{ __quadlet_podman_services_start }}"
+  loop: "{{ __quadlet_podman_services_restart }}"
   loop_control:
     loop_var: "__quadlet_podman_service_item"
     label: "{{ __quadlet_podman_service_item }}"

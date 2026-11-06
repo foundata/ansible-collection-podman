@@ -112,6 +112,7 @@ examples, and more:
       - [`quadlet_podman_units['name']`](./roles/quadlet/README.md#variable-quadlet_podman_units-sub-name)
       - [`quadlet_podman_units['type']`](./roles/quadlet/README.md#variable-quadlet_podman_units-sub-type)
       - [`quadlet_podman_units['sections']`](./roles/quadlet/README.md#variable-quadlet_podman_units-sub-sections)
+      - [`quadlet_podman_units['restart_on_change']`](./roles/quadlet/README.md#variable-quadlet_podman_units-sub-restart_on_change)
       - [`quadlet_podman_units['service_state']`](./roles/quadlet/README.md#variable-quadlet_podman_units-sub-service_state)
     - [`quadlet_podman_systemd_units`](./roles/quadlet/README.md#variable-quadlet_podman_systemd_units)
       - [`quadlet_podman_systemd_units['name']`](./roles/quadlet/README.md#variable-quadlet_podman_systemd_units-sub-name)

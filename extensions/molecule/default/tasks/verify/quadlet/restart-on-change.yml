@@ -1,0 +1,262 @@
+# SPDX-FileCopyrightText: foundata GmbH <https://foundata.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+---
+- name: "Molecule | Verify | quadlet restart | Initialize input"
+  ansible.builtin.set_fact:
+    __testing_restart_file: "initial"
+    __testing_restart_units:
+      - name: "restart-web"
+        type: "container"
+        sections:
+          Container:
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "top"
+      - name: "restart-db"
+        type: "container"
+        restart_on_change: false
+        sections:
+          Container:
+            Image: "quay.io/libpod/testimage:20241011"
+            Exec: "top"
+
+- name: "Molecule | Verify | quadlet restart | Start both services"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "restart-test"
+    quadlet_podman_service_state: "running"
+    quadlet_podman_units: "{{ __testing_restart_units }}"
+    quadlet_podman_files:
+      - dest: "/var/lib/restart-test.env"
+        content: "{{ __testing_restart_file }}"
+
+- name: "Molecule | Verify | quadlet restart | Record initial invocations"
+  ansible.builtin.command:
+    argv:
+      - "systemctl"
+      - "show"
+      - "{{ item }}.service"
+      - "--property=InvocationID"
+      - "--value"
+  changed_when:
+    - false
+  loop:
+    - "restart-web"
+    - "restart-db"
+  register: __testing_restart_before
+
+- name: "Molecule | Verify | quadlet restart | Both services started"
+  ansible.builtin.assert:
+    that:
+      - (__testing_restart_before['results'][0]['stdout'] | ansible.builtin.length) > 0
+      - (__testing_restart_before['results'][1]['stdout'] | ansible.builtin.length) > 0
+
+- name: "Molecule | Verify | quadlet restart | Change web input"
+  ansible.builtin.set_fact:
+    __testing_restart_units: >-
+      {{
+        [__testing_restart_units[0] | ansible.builtin.combine({'sections': {'Unit': {'Description': 'updated'}}}, recursive=true)]
+        + [__testing_restart_units[1]]
+      }}
+
+- name: "Molecule | Verify | quadlet restart | Change web"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "restart-test"
+    quadlet_podman_service_state: "running"
+    quadlet_podman_units: "{{ __testing_restart_units }}"
+    quadlet_podman_files:
+      - dest: "/var/lib/restart-test.env"
+        content: "{{ __testing_restart_file }}"
+
+- name: "Molecule | Verify | quadlet restart | Change web invocations"
+  ansible.builtin.command:
+    argv:
+      - "systemctl"
+      - "show"
+      - "{{ item }}.service"
+      - "--property=InvocationID"
+      - "--value"
+  changed_when:
+    - false
+  loop:
+    - "restart-web"
+    - "restart-db"
+  register: __testing_restart_after
+
+- name: "Molecule | Verify | quadlet restart | Change web preserves database"
+  ansible.builtin.assert:
+    that:
+      - __testing_restart_after['results'][0]['stdout'] != __testing_restart_before['results'][0]['stdout']
+      - __testing_restart_after['results'][1]['stdout'] == __testing_restart_before['results'][1]['stdout']
+
+- name: "Molecule | Verify | quadlet restart | Save current invocations"
+  ansible.builtin.set_fact:
+    __testing_restart_before: "{{ __testing_restart_after }}"
+
+- name: "Molecule | Verify | quadlet restart | Change protected database input"
+  ansible.builtin.set_fact:
+    __testing_restart_units: >-
+      {{
+        [__testing_restart_units[0]]
+        + [__testing_restart_units[1] | ansible.builtin.combine({'sections': {'Unit': {'Description': 'updated'}}}, recursive=true)]
+      }}
+
+- name: "Molecule | Verify | quadlet restart | Change protected database"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "restart-test"
+    quadlet_podman_service_state: "running"
+    quadlet_podman_units: "{{ __testing_restart_units }}"
+    quadlet_podman_files:
+      - dest: "/var/lib/restart-test.env"
+        content: "{{ __testing_restart_file }}"
+
+- name: "Molecule | Verify | quadlet restart | Change protected database invocations"
+  ansible.builtin.command:
+    argv:
+      - "systemctl"
+      - "show"
+      - "{{ item }}.service"
+      - "--property=InvocationID"
+      - "--value"
+  changed_when:
+    - false
+  loop:
+    - "restart-web"
+    - "restart-db"
+  register: __testing_restart_after
+
+- name: "Molecule | Verify | quadlet restart | Change protected database preserves database"
+  ansible.builtin.assert:
+    that:
+      - __testing_restart_after['results'][0]['stdout'] != __testing_restart_before['results'][0]['stdout']
+      - __testing_restart_after['results'][1]['stdout'] == __testing_restart_before['results'][1]['stdout']
+
+- name: "Molecule | Verify | quadlet restart | Save current invocations"
+  ansible.builtin.set_fact:
+    __testing_restart_before: "{{ __testing_restart_after }}"
+
+- name: "Molecule | Verify | quadlet restart | Change managed file input"
+  ansible.builtin.set_fact:
+    __testing_restart_file: "updated"
+
+- name: "Molecule | Verify | quadlet restart | Change managed file"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "restart-test"
+    quadlet_podman_service_state: "running"
+    quadlet_podman_units: "{{ __testing_restart_units }}"
+    quadlet_podman_files:
+      - dest: "/var/lib/restart-test.env"
+        content: "{{ __testing_restart_file }}"
+
+- name: "Molecule | Verify | quadlet restart | File change invocations"
+  ansible.builtin.command:
+    argv:
+      - "systemctl"
+      - "show"
+      - "{{ item }}.service"
+      - "--property=InvocationID"
+      - "--value"
+  changed_when:
+    - false
+  loop:
+    - "restart-web"
+    - "restart-db"
+  register: __testing_restart_after
+
+- name: "Molecule | Verify | quadlet restart | File change preserves database"
+  ansible.builtin.assert:
+    that:
+      - __testing_restart_after['results'][0]['stdout'] != __testing_restart_before['results'][0]['stdout']
+      - __testing_restart_after['results'][1]['stdout'] == __testing_restart_before['results'][1]['stdout']
+
+- name: "Molecule | Verify | quadlet restart | Save current invocations"
+  ansible.builtin.set_fact:
+    __testing_restart_before: "{{ __testing_restart_after }}"
+
+- name: "Molecule | Verify | quadlet restart | Repeat unchanged input"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "restart-test"
+    quadlet_podman_service_state: "running"
+    quadlet_podman_units: "{{ __testing_restart_units }}"
+    quadlet_podman_files:
+      - dest: "/var/lib/restart-test.env"
+        content: "{{ __testing_restart_file }}"
+
+- name: "Molecule | Verify | quadlet restart | Unchanged invocations"
+  ansible.builtin.command:
+    argv:
+      - "systemctl"
+      - "show"
+      - "{{ item }}.service"
+      - "--property=InvocationID"
+      - "--value"
+  changed_when:
+    - false
+  loop:
+    - "restart-web"
+    - "restart-db"
+  register: __testing_restart_after
+
+- name: "Molecule | Verify | quadlet restart | Unchanged services keep invocations"
+  ansible.builtin.assert:
+    that:
+      - __testing_restart_after['results'][0]['stdout'] == __testing_restart_before['results'][0]['stdout']
+      - __testing_restart_after['results'][1]['stdout'] == __testing_restart_before['results'][1]['stdout']
+
+- name: "Molecule | Verify | quadlet restart | Save current invocations"
+  ansible.builtin.set_fact:
+    __testing_restart_before: "{{ __testing_restart_after }}"
+
+- name: "Molecule | Verify | quadlet restart | Stop protected service"
+  ansible.builtin.systemd_service:
+    name: "restart-db.service"
+    state: "stopped"
+
+- name: "Molecule | Verify | quadlet restart | Recover stopped protected service"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "restart-test"
+    quadlet_podman_service_state: "running"
+    quadlet_podman_units: "{{ __testing_restart_units }}"
+    quadlet_podman_files:
+      - dest: "/var/lib/restart-test.env"
+        content: "{{ __testing_restart_file }}"
+
+- name: "Molecule | Verify | quadlet restart | Recovered invocations"
+  ansible.builtin.command:
+    argv:
+      - "systemctl"
+      - "show"
+      - "{{ item }}.service"
+      - "--property=InvocationID"
+      - "--value"
+  changed_when:
+    - false
+  loop:
+    - "restart-web"
+    - "restart-db"
+  register: __testing_restart_after
+
+- name: "Molecule | Verify | quadlet restart | Protected service recovers"
+  ansible.builtin.assert:
+    that:
+      - (__testing_restart_after['results'][1]['stdout'] | ansible.builtin.length) > 0
+      - __testing_restart_after['results'][1]['stdout'] != __testing_restart_before['results'][1]['stdout']
+      - __testing_restart_after['results'][0]['stdout'] == __testing_restart_before['results'][0]['stdout']
+
+- name: "Molecule | Verify | quadlet restart | Remove test application"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "restart-test"
+    quadlet_podman_state: "absent"

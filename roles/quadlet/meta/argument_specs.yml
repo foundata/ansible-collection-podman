@@ -277,6 +277,25 @@ argument_specs:
               `quadlet_podman_units` for the rendering rules and an example.
             type: "dict"
             required: true
+          restart_on_change:
+            description: |
+              Allow the role's change handler to restart this unit's service.
+              Defaults to `true`, preserving application-wide restarts when
+              any Quadlet unit, managed file, or secret changes. Set `false`
+              for services such as databases whose restarts the caller owns.
+              The role still starts the service for `enabled` or `running`,
+              including on later converges if it has stopped. Changes to the
+              unit are still reported in `quadlet_podman_result`.
+
+              This only suppresses direct restarts by the role's handler.
+              systemd dependencies (e.g. `PartOf`, `BindsTo`, or pod membership)
+              can still propagate stops and restarts. It does not prevent
+              stopping a disabled, removed, or renamed service. Changed
+              configuration and rotated secrets take effect at the next
+              caller-controlled restart. Plain systemd units have their own
+              handler and are not affected by this setting.
+            type: "bool"
+            default: true
           service_state:
             description: |
               Per-unit override of `quadlet_podman_service_state`, with the
