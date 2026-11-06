@@ -4,6 +4,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 ---
+- name: "Init | Reset the public unit change result"
+  ansible.builtin.set_fact:
+    quadlet_podman_result:
+      app: "{{ quadlet_podman_app }}"
+      user: "{{ quadlet_podman_user }}"
+      changed_units: []
+      changed_services: []
+
 - name: "Init | Include role meta data"
   ansible.builtin.include_vars:
     file: "../meta/main.yml"

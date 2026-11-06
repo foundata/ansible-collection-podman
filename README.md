@@ -97,6 +97,7 @@ examples, and more:
 
 <!-- ANSIBLE DOCSMITH TOC-FULL quadlet START -->
 - [Ansible role: `foundata.podman.quadlet`](./roles/quadlet/README.md#ansible-role-foundatapodmanquadlet)
+  - [Change result](./roles/quadlet/README.md#change-result)
   - [Table of contents](./roles/quadlet/README.md#toc)
   - [Example playbooks, using this role](./roles/quadlet/README.md#examples)
   - [Run-once containers and timers](./roles/quadlet/README.md#run-once)

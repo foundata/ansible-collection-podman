@@ -1,0 +1,129 @@
+# SPDX-FileCopyrightText: foundata GmbH <https://foundata.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+---
+- name: "Molecule | Verify | quadlet result | Declare unmanaged units"
+  ansible.builtin.set_fact:
+    __testing_result_units:
+      - name: "result-web"
+        type: "container"
+        sections:
+          Container:
+            Image: "quay.io/libpod/testimage:20241011"
+            ServiceName: "result-alias"
+            Exec: "top"
+      - name: "result-data"
+        type: "volume"
+        sections:
+          Volume: {}
+
+- name: "Molecule | Verify | quadlet result | Create units"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "result-test"
+    quadlet_podman_service_state: "unmanaged"
+    quadlet_podman_state: "present"
+    quadlet_podman_units: "{{ __testing_result_units }}"
+
+- name: "Molecule | Verify | quadlet result | Report filenames and effective services"
+  ansible.builtin.assert:
+    that:
+      - quadlet_podman_result['changed_units'] == ['result-web.container', 'result-data.volume']
+      - quadlet_podman_result['changed_services'] == ['result-alias.service', 'result-data-volume.service']
+      - quadlet_podman_result['app'] == 'result-test'
+      - quadlet_podman_result['user'] == ''
+
+- name: "Molecule | Verify | quadlet result | Repeat unchanged input"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "result-test"
+    quadlet_podman_service_state: "unmanaged"
+    quadlet_podman_state: "present"
+    quadlet_podman_units: "{{ __testing_result_units }}"
+
+- name: "Molecule | Verify | quadlet result | Clear prior changes"
+  ansible.builtin.assert:
+    that:
+      - quadlet_podman_result['changed_units'] == []
+      - quadlet_podman_result['changed_services'] == []
+
+- name: "Molecule | Verify | quadlet result | Change one unit"
+  ansible.builtin.set_fact:
+    __testing_result_units: >-
+      {{
+        [__testing_result_units[0] | ansible.builtin.combine({'sections': {'Unit': {'Description': 'changed'}}}, recursive=true)]
+        + [__testing_result_units[1]]
+      }}
+
+- name: "Molecule | Verify | quadlet result | Predict update"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+    apply:
+      check_mode: true
+  vars:
+    quadlet_podman_app: "result-test"
+    quadlet_podman_service_state: "unmanaged"
+    quadlet_podman_state: "present"
+    quadlet_podman_units: "{{ __testing_result_units }}"
+
+- name: "Molecule | Verify | quadlet result | Predict update result"
+  ansible.builtin.assert:
+    that:
+      - quadlet_podman_result['changed_units'] == ['result-web.container']
+      - quadlet_podman_result['changed_services'] == ['result-alias.service']
+
+- name: "Molecule | Verify | quadlet result | Apply update"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "result-test"
+    quadlet_podman_service_state: "unmanaged"
+    quadlet_podman_state: "present"
+    quadlet_podman_units: "{{ __testing_result_units }}"
+
+- name: "Molecule | Verify | quadlet result | Apply update result"
+  ansible.builtin.assert:
+    that:
+      - quadlet_podman_result['changed_units'] == ['result-web.container']
+      - quadlet_podman_result['changed_services'] == ['result-alias.service']
+
+- name: "Molecule | Verify | quadlet result | Remove test application"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "result-test"
+    quadlet_podman_service_state: "unmanaged"
+    quadlet_podman_state: "absent"
+    quadlet_podman_units: "{{ __testing_result_units }}"
+
+- name: "Molecule | Verify | quadlet result | Reset on removal"
+  ansible.builtin.assert:
+    that:
+      - quadlet_podman_result['changed_units'] == []
+      - quadlet_podman_result['changed_services'] == []
+
+- name: "Molecule | Verify | quadlet result | Converge empty application"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "result-test"
+    quadlet_podman_service_state: "unmanaged"
+    quadlet_podman_state: "present"
+    quadlet_podman_units: "{{ [] }}"
+
+- name: "Molecule | Verify | quadlet result | Empty input result"
+  ansible.builtin.assert:
+    that:
+      - quadlet_podman_result['changed_units'] == []
+      - quadlet_podman_result['changed_services'] == []
+
+- name: "Molecule | Verify | quadlet result | Remove empty application"
+  ansible.builtin.include_role:
+    name: "foundata.podman.quadlet"
+  vars:
+    quadlet_podman_app: "result-test"
+    quadlet_podman_service_state: "unmanaged"
+    quadlet_podman_state: "absent"
+    quadlet_podman_units: "{{ [] }}"

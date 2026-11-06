@@ -1,0 +1,6 @@
+---
+minor_changes:
+  - >-
+    quadlet - expose changed Quadlet filenames and generated service names in
+    the per-invocation ``quadlet_podman_result`` fact, including unmanaged
+    services and check mode.

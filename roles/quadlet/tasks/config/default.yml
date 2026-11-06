@@ -559,9 +559,28 @@
   loop_control:
     loop_var: "__quadlet_podman_unit_item"
     label: "{{ __quadlet_podman_unit_item['filename'] }}"
+  register: __quadlet_podman_unit_template_result
   notify:
     - "quadlet_podman_reload_systemd_daemon"
     - "quadlet_podman_restart_application_services"
+
+- name: "Config | Default | Publish changed Quadlet units and generated services"
+  ansible.builtin.set_fact:
+    quadlet_podman_result:
+      app: "{{ quadlet_podman_app }}"
+      user: "{{ quadlet_podman_user }}"
+      changed_units: >-
+        {{
+          __quadlet_podman_unit_template_result['results']
+          | ansible.builtin.selectattr('changed')
+          | ansible.builtin.map(attribute='__quadlet_podman_unit_item.filename') | ansible.builtin.list
+        }}
+      changed_services: >-
+        {{
+          __quadlet_podman_unit_template_result['results']
+          | ansible.builtin.selectattr('changed')
+          | ansible.builtin.map(attribute='__quadlet_podman_unit_item.service') | ansible.builtin.list
+        }}
 
 # Plain units are restarted on change via their own handler (not the
 # application services one): e.g. a changed OnCalendar only takes effect

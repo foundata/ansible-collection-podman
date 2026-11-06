@@ -5,6 +5,10 @@
 # SPDX-FileCopyrightText: foundata GmbH <https://foundata.com>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+- name: "Molecule | Verify | quadlet | Verify public change results"
+  ansible.builtin.include_tasks:
+    file: "{{ __testing_verify_taskdir }}/quadlet/change-result.yml"
+
 ### Rootful application ("webtest")
 
 - name: "Molecule | Verify | quadlet | Read the webtest container unit file"

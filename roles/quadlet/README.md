@@ -10,8 +10,40 @@ Ansible collection).
 
 
 
+## Change result
+
+After each invocation, `quadlet_podman_result` is a host fact with `app`,
+`user` (empty for rootful), `changed_units` (Quadlet filenames, including
+extensions), and `changed_services` (their generated service names, including
+`.service` and honoring `ServiceName`). Lists follow declaration order.
+It reports files created or updated by the Quadlet template task, including
+attribute changes, regardless of service state. Check mode reports predicted
+changes. An unchanged run returns empty lists.
+
+The fact is replaced on every invocation; save it before calling the role for
+another application. It is output, not an input variable. Removal, plain systemd
+units, managed files, secrets, and actual service restarts are outside this
+result's scope; `state: absent` returns empty lists. It is not an
+application-wide restart recommendation.
+
+For caller-controlled restarts, set `quadlet_podman_service_state: "unmanaged"`
+and consume the result after the role:
+
+```yaml
+- name: "Restart changed application services"
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: "restarted"
+  loop: "{{ quadlet_podman_result['changed_services'] }}"
+```
+
+This example uses the system scope. Rootless callers must select the user's
+systemd scope, account, and runtime environment, as for any user service.
+
+
 ## Table of contents<a id="toc"></a>
 
+- [Change result](#change-result)
 - [Example playbooks, using this role](#examples)
 - [Run-once containers and timers](#run-once)
 - [Rootless applications: data, UID mapping and SELinux](#rootless-notes)
