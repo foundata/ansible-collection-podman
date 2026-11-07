@@ -1,0 +1,10 @@
+---
+minor_changes:
+  - >-
+    Remove the previous handler topics ahead of the announced version 2.0.0:
+    "host_podman: systemd daemon-reload", "quadlet_podman: systemd
+    daemon-reload", "quadlet_podman: restart application services" and
+    "quadlet_podman: restart application systemd units". Notify the
+    role-prefixed topics instead. We decided that this is a non-breaking
+    change: the topics are role internals, and their use by third parties is
+    very unlikely.

@@ -9,5 +9,3 @@
     daemon_reload: true
   listen:
     - "host_podman_reload_systemd_daemon"
-    # Migration alias; remove in 2.0.0.
-    - "host_podman: systemd daemon-reload"

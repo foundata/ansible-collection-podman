@@ -17,8 +17,6 @@
   environment: "{{ __quadlet_podman_task_environment }}"
   listen:
     - "quadlet_podman_reload_systemd_daemon"
-    # Migration alias; remove in 2.0.0.
-    - "quadlet_podman: systemd daemon-reload"
 - name: "Handlers | Restart application services"
   become: true
   ansible.builtin.systemd_service:
@@ -36,8 +34,6 @@
     label: "{{ __quadlet_podman_service_item }}"
   listen:
     - "quadlet_podman_restart_application_services"
-    # Migration alias; remove in 2.0.0.
-    - "quadlet_podman: restart application services"
 - name: "Handlers | Restart application systemd units"
   become: true
   ansible.builtin.systemd_service:
@@ -55,5 +51,3 @@
     label: "{{ __quadlet_podman_systemd_unit_name_item }}"
   listen:
     - "quadlet_podman_restart_application_systemd_units"
-    # Migration alias; remove in 2.0.0.
-    - "quadlet_podman: restart application systemd units"
