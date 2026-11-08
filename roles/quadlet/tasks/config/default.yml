@@ -9,12 +9,14 @@
 #   2. managed files     -> environment/config files referenced by the units
 #   3. secrets           -> referenced by the units at container creation
 #   4. registry logins   -> image pulls must be able to authenticate
-#   5. Quadlet units     -> written last, then a single daemon-reload (handler)
+#   5. Quadlet units     -> written last
 #   6. cleanup           -> units removed from quadlet_podman_units get reaped,
 #                           and manifest-recorded secrets, files and registry
 #                           logins no longer declared get removed / logged out
 #   7. manifest          -> records the application's current resources for
 #                           the next run's cleanup and for state "absent"
+#   8. apply             -> a single daemon-reload, then restarts of the
+#                           services whose units, files or secrets changed
 
 - name: "Config | Default | Read the application manifest (previously created resources)"
   ansible.builtin.slurp:
@@ -310,10 +312,9 @@
   loop_control:
     loop_var: "__quadlet_podman_file_item"
     label: "{{ __quadlet_podman_file_item['dest'] }}"
-  notify:
-    - "quadlet_podman_restart_application_services"
+  register: __quadlet_podman_files_result
 
-# The restart notify makes the removal effective for running services: a
+# The restart on change makes the removal effective for running services: a
 # started container keeps its bind-mounted file open (and its environment)
 # until recreated, so without a restart it would keep using stale data.
 - name: "Config | Default | Remove files of the application (item state is absent)"
@@ -326,8 +327,7 @@
   loop_control:
     loop_var: "__quadlet_podman_file_item"
     label: "{{ __quadlet_podman_file_item['dest'] }}"
-  notify:
-    - "quadlet_podman_restart_application_services"
+  register: __quadlet_podman_files_absent_result
 
 # Declared secrets are authoritative for existence AND content: the current
 # value is read back (never logged) and a secret is only recreated when its
@@ -402,9 +402,8 @@
   loop: "{{ quadlet_podman_secrets }}"
   loop_control:
     loop_var: "__quadlet_podman_secret_item"
+  register: __quadlet_podman_secrets_result
   no_log: true # secret values must not be leaked into logs or diffs
-  notify:
-    - "quadlet_podman_restart_application_services"
 
 # A persistent authfile is used instead of podman's runtime-directory default,
 # so pulls by the generated services and podman-auto-update keep working after
@@ -560,9 +559,6 @@
     loop_var: "__quadlet_podman_unit_item"
     label: "{{ __quadlet_podman_unit_item['filename'] }}"
   register: __quadlet_podman_unit_template_result
-  notify:
-    - "quadlet_podman_reload_systemd_daemon"
-    - "quadlet_podman_restart_application_services"
 
 - name: "Config | Default | Publish changed Quadlet units and generated services"
   ansible.builtin.set_fact:
@@ -582,7 +578,7 @@
           | ansible.builtin.map(attribute='__quadlet_podman_unit_item.service') | ansible.builtin.list
         }}
 
-# Plain units are restarted on change via their own handler (not the
+# Plain units are restarted on change by their own task (not the
 # application services one): e.g. a changed OnCalendar only takes effect
 # after the timer is restarted, while unrelated application services need no
 # restart for it.
@@ -604,9 +600,7 @@
   loop_control:
     loop_var: "__quadlet_podman_systemd_unit_item"
     label: "{{ __quadlet_podman_systemd_unit_item['name'] }}"
-  notify:
-    - "quadlet_podman_reload_systemd_daemon"
-    - "quadlet_podman_restart_application_systemd_units"
+  register: __quadlet_podman_systemd_unit_template_result
 
 ### Cleanup: reap this application's units that are no longer listed
 
@@ -740,8 +734,6 @@
   loop_control:
     loop_var: "__quadlet_podman_stale_path_item"
     label: "{{ __quadlet_podman_stale_path_item }}"
-  notify:
-    - "quadlet_podman_reload_systemd_daemon"
 
 ### Cleanup: reap this application's plain systemd units no longer listed
 ### (marker-identified like the Quadlet files; other files in the shared
@@ -864,8 +856,6 @@
   loop_control:
     loop_var: "__quadlet_podman_stale_path_item"
     label: "{{ __quadlet_podman_stale_path_item }}"
-  notify:
-    - "quadlet_podman_reload_systemd_daemon"
 
 ### Cleanup: reap manifest-recorded resources that are no longer declared
 ### (renamed or de-listed secrets, managed files and registry logins)
@@ -905,8 +895,7 @@
     }}
   loop_control:
     loop_var: "__quadlet_podman_stale_file_item"
-  notify:
-    - "quadlet_podman_restart_application_services"
+  register: __quadlet_podman_stale_files_result
 
 # Removes de-listed registries from the application's OWN authfile;
 # credential isolation makes cross-application guards unnecessary (legacy
@@ -1021,3 +1010,58 @@
     - (__quadlet_podman_secret_names_declared | ansible.builtin.length) == 0
     - (__quadlet_podman_file_dests_declared | ansible.builtin.length) == 0
     - (__quadlet_podman_registries_declared | ansible.builtin.length) == 0
+
+
+### Apply the changes
+
+# Direct tasks instead of handlers: a play includes the role once per
+# application, so a handler deferred to the end of the play would act on the
+# last application's facts, and flushing the handlers would also run the
+# calling play's unrelated ones. The reload runs on every converge, so unit
+# files left behind by an earlier failed run get loaded as well.
+- name: "Config | Default | Reload the systemd manager configuration"
+  become: true
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+    scope: "{{ __quadlet_podman_systemd_scope }}"
+  become_user: "{{ __quadlet_podman_become_user }}"
+  environment: "{{ __quadlet_podman_task_environment }}"
+  when:
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+
+- name: "Config | Default | Restart the services of the application (units, files or secrets changed)"
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ __quadlet_podman_service_item }}"
+    state: "restarted"
+    scope: "{{ __quadlet_podman_systemd_scope }}"
+  become_user: "{{ __quadlet_podman_become_user }}"
+  environment: "{{ __quadlet_podman_task_environment }}"
+  when:
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+    - >-
+      (__quadlet_podman_unit_template_result is ansible.builtin.changed)
+      or (__quadlet_podman_files_result is ansible.builtin.changed)
+      or (__quadlet_podman_files_absent_result is ansible.builtin.changed)
+      or (__quadlet_podman_stale_files_result is ansible.builtin.changed)
+      or (__quadlet_podman_secrets_result is ansible.builtin.changed)
+  loop: "{{ __quadlet_podman_services_restart }}"
+  loop_control:
+    loop_var: "__quadlet_podman_service_item"
+    label: "{{ __quadlet_podman_service_item }}"
+
+- name: "Config | Default | Restart the plain systemd units of the application (unit files changed)"
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ __quadlet_podman_systemd_unit_name_item }}"
+    state: "restarted"
+    scope: "{{ __quadlet_podman_systemd_scope }}"
+  become_user: "{{ __quadlet_podman_become_user }}"
+  environment: "{{ __quadlet_podman_task_environment }}"
+  when:
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+    - __quadlet_podman_systemd_unit_template_result is ansible.builtin.changed
+  loop: "{{ __quadlet_podman_systemd_units_restart }}"
+  loop_control:
+    loop_var: "__quadlet_podman_systemd_unit_name_item"
+    label: "{{ __quadlet_podman_systemd_unit_name_item }}"

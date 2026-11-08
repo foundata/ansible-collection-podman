@@ -227,20 +227,20 @@ quadlet_podman_user: ""
 #     - Type: dict
 #     - Required: Yes
 #   - restart_on_change:
-#     Allow the role's change handler to restart this unit's service. Defaults
-#     to `true`, preserving application-wide restarts when any Quadlet unit,
+#     Allow the role to restart this unit's service on changes. Defaults to
+#     `true`, preserving application-wide restarts when any Quadlet unit,
 #     managed file, or secret changes. Set `false` for services such as
 #     databases whose restarts the caller owns. The role still starts the
 #     service for `enabled` or `running`, including on later converges if it has
 #     stopped. Changes to the unit are still reported in
 #     `quadlet_podman_result`.
 #
-#     This only suppresses direct restarts by the role's handler. systemd
+#     This only suppresses the role's own restarts on change. systemd
 #     dependencies (e.g. `PartOf`, `BindsTo`, or pod membership) can still
 #     propagate stops and restarts. It does not prevent stopping a disabled,
 #     removed, or renamed service. Changed configuration and rotated secrets
 #     take effect at the next caller-controlled restart. Plain systemd units
-#     have their own handler and are not affected by this setting.
+#     restart on their own changes and are not affected by this setting.
 #     - Type: bool
 #     - Required: No
 #     - Default: true
@@ -266,9 +266,8 @@ quadlet_podman_user: ""
 #     keep the unit managed and set `RemainAfterExit: true` in its `Service`
 #     section instead. The service then parks in `active (exited)` after
 #     success, so the role's start task is a no-op on later runs while the
-#     restart-on-change handler still re-runs it. Do not combine
-#     `RemainAfterExit` with a timer: systemd does not re-trigger a unit that is
-#     still active.
+#     restart on change still re-runs it. Do not combine `RemainAfterExit` with
+#     a timer: systemd does not re-trigger a unit that is still active.
 #     - Type: str
 #     - Required: No
 #     - Choices: enabled, disabled, running, unmanaged

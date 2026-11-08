@@ -4,50 +4,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 ---
-# Both handlers run in the scope of the application (system instance for
-# rootful, the target account's user instance for rootless), so they carry the
-# same become/environment plumbing as the tasks (see vars/main.yml).
-
-- name: "Handlers | systemd daemon-reload"
-  become: true
-  ansible.builtin.systemd_service:
-    daemon_reload: true
-    scope: "{{ __quadlet_podman_systemd_scope }}"
-  become_user: "{{ __quadlet_podman_become_user }}"
-  environment: "{{ __quadlet_podman_task_environment }}"
-  listen:
-    - "quadlet_podman_reload_systemd_daemon"
-- name: "Handlers | Restart application services"
-  become: true
-  ansible.builtin.systemd_service:
-    name: "{{ __quadlet_podman_service_item }}"
-    state: "restarted"
-    scope: "{{ __quadlet_podman_systemd_scope }}"
-  become_user: "{{ __quadlet_podman_become_user }}"
-  environment: "{{ __quadlet_podman_task_environment }}"
-  when:
-    - quadlet_podman_state == 'present'
-    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
-  loop: "{{ __quadlet_podman_services_restart }}"
-  loop_control:
-    loop_var: "__quadlet_podman_service_item"
-    label: "{{ __quadlet_podman_service_item }}"
-  listen:
-    - "quadlet_podman_restart_application_services"
-- name: "Handlers | Restart application systemd units"
-  become: true
-  ansible.builtin.systemd_service:
-    name: "{{ __quadlet_podman_systemd_unit_name_item }}"
-    state: "restarted"
-    scope: "{{ __quadlet_podman_systemd_scope }}"
-  become_user: "{{ __quadlet_podman_become_user }}"
-  environment: "{{ __quadlet_podman_task_environment }}"
-  when:
-    - quadlet_podman_state == 'present'
-    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
-  loop: "{{ __quadlet_podman_systemd_units_restart }}"
-  loop_control:
-    loop_var: "__quadlet_podman_systemd_unit_name_item"
-    label: "{{ __quadlet_podman_systemd_unit_name_item }}"
-  listen:
-    - "quadlet_podman_restart_application_systemd_units"
+# None: a play includes this role once per application, and a handler deferred
+# to the end of the play would act on the last application's facts. The tasks
+# reload systemd and restart the changed services directly instead.

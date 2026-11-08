@@ -20,10 +20,8 @@
 # Note: units created by a systemd generator cannot be enabled or disabled via
 # systemctl; whether a service starts at boot is governed by the Install
 # section of its Quadlet unit (see the quadlet_podman_service_state docs).
-# Plain unit files support real enablement, handled below.
-
-- name: "Service | Default | Apply pending systemd changes before managing the services"
-  ansible.builtin.meta: "flush_handlers"
+# Plain unit files support real enablement, handled below. The config tasks
+# already reloaded systemd and restarted the changed services.
 
 - name: "Service | Default | Start the services of the application"
   become: true

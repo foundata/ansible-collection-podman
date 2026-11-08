@@ -1,0 +1,9 @@
+---
+bugfixes:
+  - >-
+    quadlet role - Reload systemd and restart changed services directly before
+    the role returns instead of flushing all pending play handlers, preserving
+    the order of unrelated handlers of the calling play. The role no longer
+    defines handlers; its internal topics ``quadlet_podman_reload_systemd_daemon``,
+    ``quadlet_podman_restart_application_services`` and
+    ``quadlet_podman_restart_application_systemd_units`` are gone.

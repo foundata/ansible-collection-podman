@@ -208,8 +208,7 @@
       loop_control:
         loop_var: "__quadlet_podman_owned_path_item"
         label: "{{ __quadlet_podman_owned_path_item }}"
-      notify:
-        - "quadlet_podman_reload_systemd_daemon"
+      register: __quadlet_podman_systemd_owned_remove_result
 
     ### Quadlet units
 
@@ -337,11 +336,22 @@
       loop_control:
         loop_var: "__quadlet_podman_owned_path_item"
         label: "{{ __quadlet_podman_owned_path_item }}"
-      notify:
-        - "quadlet_podman_reload_systemd_daemon"
+      register: __quadlet_podman_owned_remove_result
 
-    - name: "Setup | Uninstall | Apply pending systemd changes"
-      ansible.builtin.meta: "flush_handlers"
+    # Only after a removal: unlike a converge, an uninstall does not require
+    # a reachable user instance of a rootless account.
+    - name: "Setup | Uninstall | Reload the systemd manager configuration (unit files removed)"
+      become: true
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+        scope: "{{ __quadlet_podman_systemd_scope }}"
+      become_user: "{{ __quadlet_podman_become_user }}"
+      environment: "{{ __quadlet_podman_task_environment }}"
+      when:
+        - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
+        - >-
+          (__quadlet_podman_systemd_owned_remove_result is ansible.builtin.changed)
+          or (__quadlet_podman_owned_remove_result is ansible.builtin.changed)
 
     - name: "Setup | Uninstall | Check the Podman executable is available"
       ansible.builtin.stat:

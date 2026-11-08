@@ -209,7 +209,7 @@ do not mix them up, they are mutually exclusive:
 **Run once per deployment and configuration change** (e.g. database migrations):
 keep the unit managed and set `RemainAfterExit` in its `Service` section. The
 service parks in `active (exited)` after success, so later runs are a no-op
-(`changed=0`), while the restart-on-change handler still re-runs the job
+(`changed=0`), while the role's restart on change still re-runs the job
 whenever the application's units or managed files change.
 
 ```yaml
@@ -645,7 +645,7 @@ settings within that section. See the description of
 
 [*⇑ Back to ToC ⇑*](#toc)
 
-Allow the role's change handler to restart this unit's service.
+Allow the role to restart this unit's service on changes.
 Defaults to `true`, preserving application-wide restarts when
 any Quadlet unit, managed file, or secret changes. Set `false`
 for services such as databases whose restarts the caller owns.
@@ -653,13 +653,13 @@ The role still starts the service for `enabled` or `running`,
 including on later converges if it has stopped. Changes to the
 unit are still reported in `quadlet_podman_result`.
 
-This only suppresses direct restarts by the role's handler.
+This only suppresses the role's own restarts on change.
 systemd dependencies (e.g. `PartOf`, `BindsTo`, or pod membership)
 can still propagate stops and restarts. It does not prevent
 stopping a disabled, removed, or renamed service. Changed
 configuration and rotated secrets take effect at the next
-caller-controlled restart. Plain systemd units have their own
-handler and are not affected by this setting.
+caller-controlled restart. Plain systemd units restart on their
+own changes and are not affected by this setting.
 
 - **Type**: `bool`
 - **Required**: No
@@ -694,7 +694,7 @@ override is needed: keep the unit managed and set
 `RemainAfterExit: true` in its `Service` section instead. The
 service then parks in `active (exited)` after success, so the
 role's start task is a no-op on later runs while the
-restart-on-change handler still re-runs it. Do not combine
+restart on change still re-runs it. Do not combine
 `RemainAfterExit` with a timer: systemd does not re-trigger a
 unit that is still active.
 

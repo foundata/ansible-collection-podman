@@ -554,8 +554,7 @@
 # The de-listing below removes a declared file (temp.env). That has to
 # restart the application services - a container consuming a removed file
 # would otherwise keep using the dead copy until an unrelated restart - so
-# the service start timestamp is recorded here and compared after the run
-# (plus handler flush).
+# the service start timestamp is recorded here and compared after the run.
 - name: "Molecule | Verify | quadlet | Reap: record the webtest start timestamp before de-listing"
   ansible.builtin.command:
     argv:
@@ -615,11 +614,6 @@
           Install:
             WantedBy:
               - "multi-user.target"
-
-# The role notifies its restart handler for the removed file; run it now so
-# the restart can be asserted (handlers otherwise wait for the end of the play).
-- name: "Molecule | Verify | quadlet | Reap: flush the notified handlers"
-  ansible.builtin.meta: "flush_handlers"
 
 - name: "Molecule | Verify | quadlet | Reap: record the webtest start timestamp after de-listing"
   ansible.builtin.command:

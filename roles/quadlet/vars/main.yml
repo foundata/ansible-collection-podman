@@ -368,7 +368,7 @@ __quadlet_podman_services_stop: >-
 
 
 # Plain systemd units (quadlet_podman_systemd_units) the role manages the
-# state of, and the subset the restart-on-change handler may restart; derived
+# state of, and the subset the restart on change may restart; derived
 # from the effective list built in tasks/init.yml (same per-unit
 # service_state logic as above, but every listed plain unit is managed unless
 # its effective state is "unmanaged").
@@ -410,7 +410,7 @@ __quadlet_podman_authfile_dir_path: >-
 __quadlet_podman_authfile_path: "{{ __quadlet_podman_authfile_dir_path }}/{{ quadlet_podman_app }}.json"
 
 
-# Scope abstraction for tasks and handlers that talk to Podman or systemd:
+# Scope abstraction for tasks that talk to Podman or systemd:
 # rootful work runs as root against the system instance, rootless work runs as
 # the target account against its user instance (XDG_RUNTIME_DIR and the bus
 # address must point at the account's runtime directory for systemctl --user
