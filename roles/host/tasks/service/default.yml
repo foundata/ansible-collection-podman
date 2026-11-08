@@ -10,8 +10,14 @@
 # socket. The per-user timers of rootless accounts are managed in
 # tasks/config/rootless_user.yml.
 
+# Directly, not by flushing the handlers: that would also run the calling
+# play's unrelated ones.
 - name: "Service | Default | Apply pending systemd changes before managing units"
-  ansible.builtin.meta: "flush_handlers"
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when:
+    - host_podman_service_state != 'unmanaged'
+    - (ansible_facts['service_mgr'] | ansible.builtin.lower) == 'systemd'
 
 
 - name: "Service | Default | Ensure automatic image update timer state: {{ __host_podman_auto_update_timer_unit_name }}"

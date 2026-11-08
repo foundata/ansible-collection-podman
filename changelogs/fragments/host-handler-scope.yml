@@ -1,0 +1,6 @@
+---
+bugfixes:
+  - >-
+    host role - Reload systemd directly before managing units instead of
+    flushing all pending play handlers, preserving the order of unrelated
+    handlers of the calling play.
