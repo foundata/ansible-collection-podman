@@ -1,6 +1,30 @@
 ---
 ancestor: null
 releases:
+  1.2.1:
+    changes:
+      bugfixes:
+        - host role - Reload systemd directly before managing units instead of flushing
+          all pending play handlers, preserving the order of unrelated handlers of
+          the calling play.
+        - quadlet role - Reload systemd and restart changed services directly before
+          the role returns instead of flushing all pending play handlers, preserving
+          the order of unrelated handlers of the calling play. The role no longer
+          defines handlers; its internal topics ``quadlet_podman_reload_systemd_daemon``,
+          ``quadlet_podman_restart_application_services`` and ``quadlet_podman_restart_application_systemd_units``
+          are gone.
+      minor_changes:
+        - 'Remove the previous handler topics ahead of the announced version 2.0.0:
+          "host_podman: systemd daemon-reload", "quadlet_podman: systemd daemon-reload",
+          "quadlet_podman: restart application services" and "quadlet_podman: restart
+          application systemd units". Notify the role-prefixed topics instead. We
+          decided that this is a non-breaking change: the topics are role internals,
+          and their use by third parties is very unlikely.'
+    fragments:
+      - drop-handler-topic-aliases.yml
+      - host-handler-scope.yml
+      - quadlet-handler-scope.yml
+    release_date: '2026-11-22'
   1.2.0:
     changes:
       bugfixes:
